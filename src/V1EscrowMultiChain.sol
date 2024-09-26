@@ -1,5 +1,8 @@
+/* TODO: rewrite cross chain implementation to minimize onchain footprint. Users are already relying on trust of TFT. Minimize the gas. */
+
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+/*
+pragma solidity ^0.8.25;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -146,3 +149,4 @@ contract TFTV1MultiChainEscrow is Ownable, ReentrancyGuard {
 
     // Additional helper functions can be added here (e.g., to view trade details, extend deadline, etc.)
 }
+*/

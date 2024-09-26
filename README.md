@@ -1,66 +1,124 @@
-## Foundry
+# TFTV1Escrow Smart Contract
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+TFTV1Escrow is a decentralized escrow system built on Ethereum. It allows multiple participants to create trades, deposit assets (both ERC20 tokens and NFTs), and execute trades in a trustless manner.
 
-Foundry consists of:
+## Table of Contents
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Interacting with the Contract](#interacting-with-the-contract)
+- [Security Considerations](#security-considerations)
+- [Contributing](#contributing)
+- [License](#license)
 
-## Documentation
+## Features
 
-https://book.getfoundry.sh/
+- Multi-party escrow system
+- Support for both ERC20 tokens and NFTs
+- Flat fee system for trade participation
+- Admin controls for fee adjustment and recipient management
+- Comprehensive test suite using Forge
 
-## Usage
+## Prerequisites
 
-### Build
+- [Foundry](https://book.getfoundry.sh/getting-started/installation.html)
+- [Node.js](https://nodejs.org/) and npm (for additional tooling if needed)
+- An Ethereum wallet with some ETH for deployment and testing
 
-```shell
-$ forge build
+## Installation
+
+1. Clone the repository:
+
+   ```
+   git clone https://github.com/thisforthatapp/contracts
+   cd contracts
+   ```
+
+2. Install dependencies:
+
+   ```
+   forge install
+   ```
+
+3. Set up your environment variables by creating a `.env` file:
+   ```
+   SEPOLIA_RPC_URL=https://sepolia.infura.io/v3/YOUR_INFURA_PROJECT_ID
+   PRIVATE_KEY=your_wallet_private_key
+   ETHERSCAN_API_KEY=your_etherscan_api_key
+   ```
+
+## Testing
+
+Run the test suite using Forge:
+
+```
+forge test
 ```
 
-### Test
+For more verbose output:
 
-```shell
-$ forge test
+```
+forge test -vvv
 ```
 
-### Format
+## Deployment
 
-```shell
-$ forge fmt
-```
+1. Ensure your `.env` file is set up correctly.
 
-### Gas Snapshots
+2. Deploy to Sepolia testnet:
 
-```shell
-$ forge snapshot
-```
+   ```
+   forge script script/DeployTFTV1Escrow.s.sol:DeployTFTV1Escrow --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vvvv
+   ```
 
-### Anvil
+3. Note the deployed contract address printed in the console.
 
-```shell
-$ anvil
-```
+## Interacting with the Contract
 
-### Deploy
+You can interact with the deployed contract using Foundry's `cast` command or by writing additional scripts.
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
+### Examples:
 
-### Cast
+1. Create a trade:
 
-```shell
-$ cast <subcommand>
-```
+   ```
+   cast send <CONTRACT_ADDRESS> "createTrade(address[])" "[<PARTICIPANT1>,<PARTICIPANT2>]" --rpc-url $SEPOLIA_RPC_URL --private-key $PRIVATE_KEY
+   ```
 
-### Help
+2. Deposit an asset:
 
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+   ```
+   cast send <CONTRACT_ADDRESS> "depositAsset(uint256,address,uint256,uint256,bool)" <TRADE_ID> <TOKEN_ADDRESS> <TOKEN_ID> <AMOUNT> <IS_NFT> --value <FEE_AMOUNT> --rpc-url $SEPOLIA_RPC_URL --private-key $PRIVATE_KEY
+   ```
+
+3. Confirm a trade:
+   ```
+   cast send <CONTRACT_ADDRESS> "confirmTrade(uint256)" <TRADE_ID> --rpc-url $SEPOLIA_RPC_URL --private-key $PRIVATE_KEY
+   ```
+
+### Running the Interaction Script
+
+To run a full trade scenario:
+
+1. Update the `InteractWithTFTV1Escrow.s.sol` script with your deployed contract address.
+2. Run the script:
+   ```
+   forge script script/InteractWithTFTV1Escrow.s.sol:InteractWithTFTV1Escrow --rpc-url $SEPOLIA_RPC_URL --broadcast -vvvv
+   ```
+
+## Security Considerations
+
+- Always handle private keys securely and never commit them to version control.
+- Thoroughly test the contract in various scenarios before deploying to mainnet.
+- Consider getting a professional audit before using the contract with real assets.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
