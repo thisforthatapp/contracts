@@ -74,7 +74,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     error InvalidTokenAddress();
     error UnsupportedAssetType();
 
-    constructor(address initialFeeRecipient) {
+    constructor(address initialFeeRecipient) Ownable(msg.sender) {
         feeRecipient = initialFeeRecipient;
     }
 
