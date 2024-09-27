@@ -4,17 +4,22 @@ pragma solidity ^0.8.25;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+import "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
+import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract TFTV1Escrow is ReentrancyGuard, Ownable {
+contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     using SafeERC20 for IERC20;
+
+    enum AssetType { ERC20, ERC721, ERC1155 }
 
     struct Asset {
         address token;
         uint256 tokenId;
         uint256 amount;
-        bool isNFT;
+        AssetType assetType;
         address recipient;
     }
 
@@ -40,7 +45,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable {
     address public feeRecipient;
 
     event TradeCreated(uint256 indexed tradeId, address[] participants, uint256 duration);
-    event AssetDeposited(uint256 indexed tradeId, address participant, address token, uint256 tokenId, uint256 amount, bool isNFT, address recipient);
+    event AssetDeposited(uint256 indexed tradeId, address participant, address token, uint256 tokenId, uint256 amount, AssetType assetType, address recipient);
     event AssetsReclaimed(uint256 indexed tradeId, address participant);
     event TradeConfirmed(uint256 indexed tradeId, address participant);
     event TradeCompleted(uint256 indexed tradeId);
@@ -67,6 +72,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable {
     error FeeTransferFailed();
     error InvalidRecipientAddress();
     error InvalidTokenAddress();
+    error UnsupportedAssetType();
 
     constructor(address initialFeeRecipient) {
         feeRecipient = initialFeeRecipient;
@@ -102,7 +108,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable {
         return tradeId;
     }
 
-    function depositAsset(uint256 _tradeId, address _token, uint256 _tokenId, uint256 _amount, bool _isNFT, address memory _recipient) external payable nonReentrant {
+    function depositAsset(uint256 _tradeId, address _token, uint256 _tokenId, uint256 _amount, AssetType _assetType, address _recipient) external payable nonReentrant {
         Trade storage trade = trades[_tradeId];
         if (!trade.isActive) revert TradeNotActive();
         if (block.timestamp >= trade.deadline) revert TradeDeadlinePassed();
@@ -120,14 +126,18 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable {
             emit FeePaid(_tradeId, msg.sender);
         }
 
-        if (_isNFT) {
-            IERC721(_token).transferFrom(msg.sender, address(this), _tokenId);
-        } else {
+        if (_assetType == AssetType.ERC20) {
             IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
+        } else if (_assetType == AssetType.ERC721) {
+            IERC721(_token).safeTransferFrom(msg.sender, address(this), _tokenId);
+        } else if (_assetType == AssetType.ERC1155) {
+            IERC1155(_token).safeTransferFrom(msg.sender, address(this), _tokenId, _amount, "");
+        } else {
+            revert UnsupportedAssetType();
         }
 
-        trade.assets[msg.sender].push(Asset(_token, _tokenId, _amount, _isNFT, _recipient));
-        emit AssetDeposited(_tradeId, msg.sender, _token, _tokenId, _amount, _isNFT, _recipient);
+        trade.assets[msg.sender].push(Asset(_token, _tokenId, _amount, _assetType, _recipient));
+        emit AssetDeposited(_tradeId, msg.sender, _token, _tokenId, _amount, _assetType, _recipient);
     }
 
     function confirmTrade(uint256 _tradeId) external nonReentrant {
@@ -163,11 +173,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable {
             Asset[] storage assets = trade.assets[participant];
             for (uint j = 0; j < assets.length; j++) {
                 Asset memory asset = assets[j];
-                if (asset.isNFT) {
-                    IERC721(asset.token).transferFrom(address(this), participant, asset.tokenId);
-                } else {
-                    IERC20(asset.token).safeTransfer(participant, asset.amount);
-                }
+                _transferAsset(asset, address(this), participant);
             }
             delete trade.assets[participant];
         }
@@ -187,13 +193,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable {
 
             for (uint j = 0; j < assets.length; j++) {
                 Asset memory asset = assets[j];
-                address to = asset.recipient;
-
-                if (asset.isNFT) {
-                    IERC721(asset.token).transferFrom(address(this), to, asset.tokenId);
-                } else {
-                    IERC20(asset.token).safeTransfer(to, asset.amount);
-                }
+                _transferAsset(asset, address(this), asset.recipient);
             }
             delete trade.assets[from];
         }
@@ -211,14 +211,9 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable {
         Asset[] storage assets = trade.assets[msg.sender];
         if (assets.length == 0) revert NoAssetsToReclaim();
 
-        // Transfer assets back to the participant
         for (uint i = 0; i < assets.length; i++) {
             Asset memory asset = assets[i];
-            if (asset.isNFT) {
-                IERC721(asset.token).transferFrom(address(this), msg.sender, asset.tokenId);
-            } else {
-                IERC20(asset.token).safeTransfer(msg.sender, asset.amount);
-            }
+            _transferAsset(asset, address(this), msg.sender);
         }
         delete trade.assets[msg.sender];
 
@@ -256,6 +251,18 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable {
         accumulatedFees -= _amount;
         (bool success, ) = payable(feeRecipient).call{value: _amount}("");
         if (!success) revert FeeTransferFailed();
+    }
+
+    function _transferAsset(Asset memory asset, address from, address to) internal {
+        if (asset.assetType == AssetType.ERC20) {
+            IERC20(asset.token).safeTransfer(to, asset.amount);
+        } else if (asset.assetType == AssetType.ERC721) {
+            IERC721(asset.token).safeTransferFrom(from, to, asset.tokenId);
+        } else if (asset.assetType == AssetType.ERC1155) {
+            IERC1155(asset.token).safeTransferFrom(from, to, asset.tokenId, asset.amount, "");
+        } else {
+            revert UnsupportedAssetType();
+        }
     }
 
     receive() external payable {}
