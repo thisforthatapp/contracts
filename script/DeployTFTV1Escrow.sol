@@ -16,11 +16,11 @@ contract DeployTFTV1Escrow is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         TFTV1Escrow escrow = new TFTV1Escrow(feeRecipient);
-        
+
         // Deploy mock tokens for testing
         MockERC20 erc20 = new MockERC20("Mock ERC20", "MERC20");
         MockERC721 erc721 = new MockERC721("Mock ERC721", "MERC721");
-        MockERC1155 erc1155 = new MockERC1155("https://token-uri.com/");
+        MockERC1155 erc1155 = new MockERC1155();
 
         vm.stopBroadcast();
 

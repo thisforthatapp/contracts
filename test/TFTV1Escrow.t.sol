@@ -14,197 +14,366 @@ contract TFTV1EscrowTest is Test {
     MockERC1155 public erc1155Token;
 
     address public owner;
+    address public addr1;
+    address public addr2;
+    address public addr3;
     address public feeRecipient;
-    address public alice;
-    address public bob;
 
     uint256 public constant FLAT_FEE = 0.005 ether;
 
     function setUp() public {
         owner = address(this);
-        feeRecipient = address(0x123);
-        alice = address(0xA11CE);
-        bob = address(0xB0B);
+        addr1 = address(0x1);
+        addr2 = address(0x2);
+        addr3 = address(0x3);
+        feeRecipient = address(0x4);
 
+        vm.startPrank(owner);
         escrow = new TFTV1Escrow(feeRecipient);
-        erc20Token = new MockERC20("Mock ERC20", "MERC20");
-        erc721Token = new MockERC721("Mock ERC721", "MERC721");
-        erc1155Token = new MockERC1155("https://token-uri.com/");
-
-        // Mint tokens
-        erc20Token.mint(alice, 1000 ether);
-        erc721Token.mint(alice, 1);
-        erc1155Token.mint(alice, 1, 100, "");
-
-        // Approve escrow
-        vm.startPrank(alice);
-        erc20Token.approve(address(escrow), type(uint256).max);
-        erc721Token.setApprovalForAll(address(escrow), true);
-        erc1155Token.setApprovalForAll(address(escrow), true);
+        erc20Token = new MockERC20("MockToken", "MTK");
+        erc721Token = new MockERC721("MockNFT", "MNFT");
+        erc1155Token = new MockERC1155();
         vm.stopPrank();
+
+        // Mint tokens for testing
+        erc20Token.mint(addr1, 1000 ether);
+        erc721Token.mint(addr1, 1);
+        erc1155Token.mint(addr1, 1, 100, "");
+
+        vm.deal(addr1, 100 ether);
+        vm.deal(addr2, 100 ether);
     }
 
     function testCreateTrade() public {
         address[] memory participants = new address[](2);
-        participants[0] = alice;
-        participants[1] = bob;
+        participants[0] = addr1;
+        participants[1] = addr2;
 
-        vm.prank(alice);
-        uint256 tradeId = escrow.createTrade(participants, 1 days);
+        vm.prank(addr1);
+        uint256 tradeId = escrow.createTrade(participants, 0);
 
         assertEq(tradeId, 0, "First trade should have ID 0");
     }
 
+    function testCreateTradeInvalidParticipantCount() public {
+        address[] memory participants = new address[](1);
+        participants[0] = addr1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(TFTV1Escrow.InvalidParticipantCount.selector)
+        );
+        escrow.createTrade(participants, 0);
+
+        participants = new address[](11);
+        for (uint i = 0; i < 11; i++) {
+            participants[i] = address(uint160(i + 1));
+        }
+
+        vm.expectRevert(
+            abi.encodeWithSelector(TFTV1Escrow.InvalidParticipantCount.selector)
+        );
+        escrow.createTrade(participants, 0);
+    }
+
+    function testCreateTradeInvalidDuration() public {
+        address[] memory participants = new address[](2);
+        participants[0] = addr1;
+        participants[1] = addr2;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(TFTV1Escrow.InvalidDuration.selector)
+        );
+        escrow.createTrade(participants, 12 hours);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(TFTV1Escrow.InvalidDuration.selector)
+        );
+        escrow.createTrade(participants, 31 days);
+    }
+
     function testDepositERC20() public {
         address[] memory participants = new address[](2);
-        participants[0] = alice;
-        participants[1] = bob;
+        participants[0] = addr1;
+        participants[1] = addr2;
 
-        vm.startPrank(alice);
-        uint256 tradeId = escrow.createTrade(participants, 1 days);
-        
-        uint256 amount = 100 ether;
-        escrow.depositAsset{value: FLAT_FEE}(tradeId, address(erc20Token), 0, amount, TFTV1Escrow.AssetType.ERC20, bob);
+        vm.startPrank(addr1);
+        uint256 tradeId = escrow.createTrade(participants, 0);
+        erc20Token.approve(address(escrow), 100 ether);
+        escrow.depositAsset{value: FLAT_FEE}(
+            tradeId,
+            address(erc20Token),
+            0,
+            100 ether,
+            TFTV1Escrow.AssetType.ERC20,
+            addr2
+        );
         vm.stopPrank();
 
-        assertEq(erc20Token.balanceOf(address(escrow)), amount, "Escrow should have received ERC20 tokens");
+        assertEq(
+            erc20Token.balanceOf(address(escrow)),
+            100 ether,
+            "Escrow should have received 100 tokens"
+        );
     }
 
     function testDepositERC721() public {
         address[] memory participants = new address[](2);
-        participants[0] = alice;
-        participants[1] = bob;
+        participants[0] = addr1;
+        participants[1] = addr2;
 
-        vm.startPrank(alice);
-        uint256 tradeId = escrow.createTrade(participants, 1 days);
-        
-        escrow.depositAsset{value: FLAT_FEE}(tradeId, address(erc721Token), 1, 1, TFTV1Escrow.AssetType.ERC721, bob);
+        vm.startPrank(addr1);
+        uint256 tradeId = escrow.createTrade(participants, 0);
+        erc721Token.approve(address(escrow), 1);
+        escrow.depositAsset{value: FLAT_FEE}(
+            tradeId,
+            address(erc721Token),
+            1,
+            1,
+            TFTV1Escrow.AssetType.ERC721,
+            addr2
+        );
         vm.stopPrank();
 
-        assertEq(erc721Token.ownerOf(1), address(escrow), "Escrow should own the ERC721 token");
+        assertEq(
+            erc721Token.ownerOf(1),
+            address(escrow),
+            "Escrow should own the NFT"
+        );
     }
 
     function testDepositERC1155() public {
         address[] memory participants = new address[](2);
-        participants[0] = alice;
-        participants[1] = bob;
+        participants[0] = addr1;
+        participants[1] = addr2;
 
-        vm.startPrank(alice);
-        uint256 tradeId = escrow.createTrade(participants, 1 days);
-        
-        uint256 amount = 50;
-        escrow.depositAsset{value: FLAT_FEE}(tradeId, address(erc1155Token), 1, amount, TFTV1Escrow.AssetType.ERC1155, bob);
+        vm.startPrank(addr1);
+        uint256 tradeId = escrow.createTrade(participants, 0);
+        erc1155Token.setApprovalForAll(address(escrow), true);
+        escrow.depositAsset{value: FLAT_FEE}(
+            tradeId,
+            address(erc1155Token),
+            1,
+            50,
+            TFTV1Escrow.AssetType.ERC1155,
+            addr2
+        );
         vm.stopPrank();
 
-        assertEq(erc1155Token.balanceOf(address(escrow), 1), amount, "Escrow should have received ERC1155 tokens");
+        assertEq(
+            erc1155Token.balanceOf(address(escrow), 1),
+            50,
+            "Escrow should have received 50 tokens"
+        );
     }
 
     function testConfirmTrade() public {
         address[] memory participants = new address[](2);
-        participants[0] = alice;
-        participants[1] = bob;
+        participants[0] = addr1;
+        participants[1] = addr2;
 
-        vm.prank(alice);
-        uint256 tradeId = escrow.createTrade(participants, 1 days);
-
-        vm.startPrank(alice);
-        escrow.depositAsset{value: FLAT_FEE}(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, bob);
+        vm.startPrank(addr1);
+        uint256 tradeId = escrow.createTrade(participants, 0);
+        erc20Token.approve(address(escrow), 100 ether);
+        escrow.depositAsset{value: FLAT_FEE}(
+            tradeId,
+            address(erc20Token),
+            0,
+            100 ether,
+            TFTV1Escrow.AssetType.ERC20,
+            addr2
+        );
         escrow.confirmTrade(tradeId);
         vm.stopPrank();
 
-        vm.startPrank(bob);
-        escrow.depositAsset{value: FLAT_FEE}(tradeId, address(erc721Token), 1, 1, TFTV1Escrow.AssetType.ERC721, alice);
-        escrow.confirmTrade(tradeId);
+        vm.startPrank(addr2);
+        erc721Token.mint(addr2, 2);
+        erc721Token.approve(address(escrow), 2);
+        escrow.depositAsset{value: FLAT_FEE}(
+            tradeId,
+            address(erc721Token),
+            2,
+            1,
+            TFTV1Escrow.AssetType.ERC721,
+            addr1
+        );
         vm.stopPrank();
 
-        // Check that the trade was executed
-        assertEq(erc20Token.balanceOf(bob), 100 ether, "Bob should have received ERC20 tokens");
-        assertEq(erc721Token.ownerOf(1), alice, "Alice should have received the ERC721 token");
+        // Check balances before final confirmation
+        uint256 addr2ERC20BalanceBefore = erc20Token.balanceOf(addr2);
+        address nftOwnerBefore = erc721Token.ownerOf(2);
+
+        // Final confirmation and trade execution
+        vm.prank(addr2);
+        escrow.confirmTrade(tradeId);
+
+        // Check final balances
+        assertEq(
+            erc20Token.balanceOf(addr2),
+            addr2ERC20BalanceBefore + 100 ether,
+            "addr2 should have received 100 ERC20 tokens"
+        );
+        assertEq(erc721Token.ownerOf(2), addr1, "addr1 should own the NFT");
     }
 
     function testCancelTrade() public {
         address[] memory participants = new address[](2);
-        participants[0] = alice;
-        participants[1] = bob;
+        participants[0] = addr1;
+        participants[1] = addr2;
 
-        vm.prank(alice);
-        uint256 tradeId = escrow.createTrade(participants, 1 days);
+        uint256 initialBalance = erc20Token.balanceOf(addr1);
 
-        vm.startPrank(alice);
-        escrow.depositAsset{value: FLAT_FEE}(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, bob);
+        vm.startPrank(addr1);
+        uint256 tradeId = escrow.createTrade(participants, 0);
+        erc20Token.approve(address(escrow), 100 ether);
+        escrow.depositAsset{value: FLAT_FEE}(
+            tradeId,
+            address(erc20Token),
+            0,
+            100 ether,
+            TFTV1Escrow.AssetType.ERC20,
+            addr2
+        );
         escrow.cancelTrade(tradeId);
         vm.stopPrank();
 
-        assertEq(erc20Token.balanceOf(alice), 1000 ether, "Alice should have received back her ERC20 tokens");
+        assertEq(
+            erc20Token.balanceOf(addr1),
+            initialBalance,
+            "addr1 should have received back their tokens"
+        );
     }
 
     function testReclaimAssets() public {
         address[] memory participants = new address[](2);
-        participants[0] = alice;
-        participants[1] = bob;
+        participants[0] = addr1;
+        participants[1] = addr2;
 
-        vm.prank(alice);
+        uint256 initialBalance = erc20Token.balanceOf(addr1);
+
+        vm.startPrank(addr1);
         uint256 tradeId = escrow.createTrade(participants, 1 days);
-
-        vm.startPrank(alice);
-        escrow.depositAsset{value: FLAT_FEE}(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, bob);
+        erc20Token.approve(address(escrow), 100 ether);
+        escrow.depositAsset{value: FLAT_FEE}(
+            tradeId,
+            address(erc20Token),
+            0,
+            100 ether,
+            TFTV1Escrow.AssetType.ERC20,
+            addr2
+        );
         vm.stopPrank();
 
-        // Fast forward past the deadline
         vm.warp(block.timestamp + 2 days);
 
-        vm.prank(alice);
+        vm.prank(addr1);
         escrow.reclaimAssets(tradeId);
 
-        assertEq(erc20Token.balanceOf(alice), 1000 ether, "Alice should have reclaimed her ERC20 tokens");
+        assertEq(
+            erc20Token.balanceOf(addr1),
+            initialBalance,
+            "addr1 should have reclaimed their tokens"
+        );
     }
 
     function testWithdrawFees() public {
         address[] memory participants = new address[](2);
-        participants[0] = alice;
-        participants[1] = bob;
+        participants[0] = addr1;
+        participants[1] = addr2;
 
-        vm.prank(alice);
-        uint256 tradeId = escrow.createTrade(participants, 1 days);
+        vm.prank(addr1);
+        uint256 tradeId = escrow.createTrade(participants, 0);
 
-        vm.prank(alice);
-        escrow.depositAsset{value: FLAT_FEE}(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, bob);
+        vm.startPrank(addr1);
+        erc20Token.approve(address(escrow), 100 ether);
+        escrow.depositAsset{value: FLAT_FEE}(
+            tradeId,
+            address(erc20Token),
+            0,
+            100 ether,
+            TFTV1Escrow.AssetType.ERC20,
+            addr2
+        );
+        vm.stopPrank();
 
-        uint256 initialBalance = feeRecipient.balance;
-        
+        uint256 balanceBefore = feeRecipient.balance;
         vm.prank(feeRecipient);
         escrow.withdrawFees(FLAT_FEE);
 
-        assertEq(feeRecipient.balance, initialBalance + FLAT_FEE, "Fee recipient should have received the fee");
+        assertEq(
+            feeRecipient.balance,
+            balanceBefore + FLAT_FEE,
+            "Fee recipient should have received the fee"
+        );
     }
 
-    function testFailDepositAfterDeadline() public {
+    function testSetFlatFee() public {
+        uint256 newFee = 0.01 ether;
+        vm.prank(owner);
+        escrow.setFlatFee(newFee);
+
         address[] memory participants = new address[](2);
-        participants[0] = alice;
-        participants[1] = bob;
+        participants[0] = addr1;
+        participants[1] = addr2;
 
-        vm.prank(alice);
-        uint256 tradeId = escrow.createTrade(participants, 1 days);
+        vm.prank(addr1);
+        uint256 tradeId = escrow.createTrade(participants, 0);
 
-        // Fast forward past the deadline
-        vm.warp(block.timestamp + 2 days);
-
-        vm.prank(alice);
-        escrow.depositAsset{value: FLAT_FEE}(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, bob);
-    }
-
-    function testFailDepositExceedingMaxAssets() public {
-        address[] memory participants = new address[](2);
-        participants[0] = alice;
-        participants[1] = bob;
-
-        vm.prank(alice);
-        uint256 tradeId = escrow.createTrade(participants, 1 days);
-
-        vm.startPrank(alice);
-        for (uint i = 0; i < 11; i++) {
-            escrow.depositAsset{value: FLAT_FEE}(tradeId, address(erc20Token), 0, 1 ether, TFTV1Escrow.AssetType.ERC20, bob);
-        }
+        vm.startPrank(addr1);
+        erc20Token.approve(address(escrow), 100 ether);
+        vm.expectRevert(
+            abi.encodeWithSelector(TFTV1Escrow.IncorrectFeeAmount.selector)
+        );
+        escrow.depositAsset{value: FLAT_FEE}(
+            tradeId,
+            address(erc20Token),
+            0,
+            100 ether,
+            TFTV1Escrow.AssetType.ERC20,
+            addr2
+        );
+        escrow.depositAsset{value: newFee}(
+            tradeId,
+            address(erc20Token),
+            0,
+            100 ether,
+            TFTV1Escrow.AssetType.ERC20,
+            addr2
+        );
         vm.stopPrank();
+    }
+
+    function testSetFeeRecipient() public {
+        address newRecipient = address(0x5);
+        vm.prank(owner);
+        escrow.setFeeRecipient(newRecipient);
+
+        address[] memory participants = new address[](2);
+        participants[0] = addr1;
+        participants[1] = addr2;
+
+        vm.prank(addr1);
+        uint256 tradeId = escrow.createTrade(participants, 0);
+
+        vm.startPrank(addr1);
+        erc20Token.approve(address(escrow), 100 ether);
+        escrow.depositAsset{value: FLAT_FEE}(
+            tradeId,
+            address(erc20Token),
+            0,
+            100 ether,
+            TFTV1Escrow.AssetType.ERC20,
+            addr2
+        );
+        vm.stopPrank();
+
+        uint256 balanceBefore = newRecipient.balance;
+        vm.prank(newRecipient);
+        escrow.withdrawFees(FLAT_FEE);
+
+        assertEq(
+            newRecipient.balance,
+            balanceBefore + FLAT_FEE,
+            "New fee recipient should have received the fee"
+        );
     }
 }

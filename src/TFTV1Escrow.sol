@@ -13,7 +13,11 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     using SafeERC20 for IERC20;
 
-    enum AssetType { ERC20, ERC721, ERC1155 }
+    enum AssetType {
+        ERC20,
+        ERC721,
+        ERC1155
+    }
 
     struct Asset {
         address token;
@@ -44,8 +48,20 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     uint256 public accumulatedFees;
     address public feeRecipient;
 
-    event TradeCreated(uint256 indexed tradeId, address[] participants, uint256 duration);
-    event AssetDeposited(uint256 indexed tradeId, address participant, address token, uint256 tokenId, uint256 amount, AssetType assetType, address recipient);
+    event TradeCreated(
+        uint256 indexed tradeId,
+        address[] participants,
+        uint256 duration
+    );
+    event AssetDeposited(
+        uint256 indexed tradeId,
+        address participant,
+        address token,
+        uint256 tokenId,
+        uint256 amount,
+        AssetType assetType,
+        address recipient
+    );
     event AssetsReclaimed(uint256 indexed tradeId, address participant);
     event TradeConfirmed(uint256 indexed tradeId, address participant);
     event TradeCompleted(uint256 indexed tradeId);
@@ -78,11 +94,16 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         feeRecipient = initialFeeRecipient;
     }
 
-    function createTrade(address[] memory _participants, uint256 _duration) external returns (uint256) {
-        if (_participants.length < 2 || _participants.length > MAX_PARTICIPANTS) {
+    function createTrade(
+        address[] memory _participants,
+        uint256 _duration
+    ) external returns (uint256) {
+        if (
+            _participants.length < 2 || _participants.length > MAX_PARTICIPANTS
+        ) {
             revert InvalidParticipantCount();
         }
-        
+
         // Set default duration if not specified
         if (_duration == 0) {
             _duration = TRADE_DURATION;
@@ -108,13 +129,21 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         return tradeId;
     }
 
-    function depositAsset(uint256 _tradeId, address _token, uint256 _tokenId, uint256 _amount, AssetType _assetType, address _recipient) external payable nonReentrant {
+    function depositAsset(
+        uint256 _tradeId,
+        address _token,
+        uint256 _tokenId,
+        uint256 _amount,
+        AssetType _assetType,
+        address _recipient
+    ) external payable nonReentrant {
         Trade storage trade = trades[_tradeId];
         if (!trade.isActive) revert TradeNotActive();
         if (block.timestamp >= trade.deadline) revert TradeDeadlinePassed();
         if (!isParticipant[_tradeId][msg.sender]) revert NotParticipant();
         if (!isParticipant[_tradeId][_recipient]) revert NotParticipant();
-        if (trade.assets[msg.sender].length >= MAX_ASSETS_PER_PARTICIPANT) revert MaxAssetsPerParticipantExceeded();
+        if (trade.assets[msg.sender].length >= MAX_ASSETS_PER_PARTICIPANT)
+            revert MaxAssetsPerParticipantExceeded();
         if (_recipient == address(0)) revert InvalidRecipientAddress();
         if (_token == address(0)) revert InvalidTokenAddress();
 
@@ -129,15 +158,35 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         if (_assetType == AssetType.ERC20) {
             IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
         } else if (_assetType == AssetType.ERC721) {
-            IERC721(_token).safeTransferFrom(msg.sender, address(this), _tokenId);
+            IERC721(_token).safeTransferFrom(
+                msg.sender,
+                address(this),
+                _tokenId
+            );
         } else if (_assetType == AssetType.ERC1155) {
-            IERC1155(_token).safeTransferFrom(msg.sender, address(this), _tokenId, _amount, "");
+            IERC1155(_token).safeTransferFrom(
+                msg.sender,
+                address(this),
+                _tokenId,
+                _amount,
+                ""
+            );
         } else {
             revert UnsupportedAssetType();
         }
 
-        trade.assets[msg.sender].push(Asset(_token, _tokenId, _amount, _assetType, _recipient));
-        emit AssetDeposited(_tradeId, msg.sender, _token, _tokenId, _amount, _assetType, _recipient);
+        trade.assets[msg.sender].push(
+            Asset(_token, _tokenId, _amount, _assetType, _recipient)
+        );
+        emit AssetDeposited(
+            _tradeId,
+            msg.sender,
+            _token,
+            _tokenId,
+            _amount,
+            _assetType,
+            _recipient
+        );
     }
 
     function confirmTrade(uint256 _tradeId) external nonReentrant {
@@ -148,7 +197,6 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         if (trade.hasConfirmed[msg.sender]) revert AlreadyConfirmed();
         if (!trade.hasPaidFee[msg.sender]) revert FeeNotPaid();
         if (trade.assets[msg.sender].length == 0) revert NoAssetsDeposited();
-
 
         trade.hasConfirmed[msg.sender] = true;
         trade.confirmations++;
@@ -181,7 +229,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         emit TradeCancelled(_tradeId);
     }
 
-    function executeTrade(uint256 _tradeId) internal nonReentrant {
+    function executeTrade(uint256 _tradeId) internal {
         Trade storage trade = trades[_tradeId];
         uint256 participantCount = trade.participants.length;
 
@@ -197,7 +245,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
             }
             delete trade.assets[from];
         }
-        
+
         emit TradeCompleted(_tradeId);
     }
 
@@ -239,7 +287,8 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     }
 
     function setFeeRecipient(address _newFeeRecipient) external onlyOwner {
-        if (_newFeeRecipient == address(0)) revert FeeRecipientCannotBeZeroAddress();
+        if (_newFeeRecipient == address(0))
+            revert FeeRecipientCannotBeZeroAddress();
         feeRecipient = _newFeeRecipient;
         emit FeeRecipientUpdated(_newFeeRecipient);
     }
@@ -247,19 +296,29 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     function withdrawFees(uint256 _amount) external nonReentrant {
         if (msg.sender != feeRecipient) revert OnlyFeeRecipientCanWithdraw();
         if (_amount > accumulatedFees) revert InsufficientFees();
-        
+
         accumulatedFees -= _amount;
         (bool success, ) = payable(feeRecipient).call{value: _amount}("");
         if (!success) revert FeeTransferFailed();
     }
 
-    function _transferAsset(Asset memory asset, address from, address to) internal {
+    function _transferAsset(
+        Asset memory asset,
+        address from,
+        address to
+    ) internal {
         if (asset.assetType == AssetType.ERC20) {
             IERC20(asset.token).safeTransfer(to, asset.amount);
         } else if (asset.assetType == AssetType.ERC721) {
             IERC721(asset.token).safeTransferFrom(from, to, asset.tokenId);
         } else if (asset.assetType == AssetType.ERC1155) {
-            IERC1155(asset.token).safeTransferFrom(from, to, asset.tokenId, asset.amount, "");
+            IERC1155(asset.token).safeTransferFrom(
+                from,
+                to,
+                asset.tokenId,
+                asset.amount,
+                ""
+            );
         } else {
             revert UnsupportedAssetType();
         }
