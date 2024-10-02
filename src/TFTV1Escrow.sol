@@ -10,13 +10,20 @@ import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+// Interface for CryptoPunks contract
+interface ICryptoPunks {
+    function punkIndexToAddress(uint256 punkIndex) external view returns (address);
+    function transferPunk(address to, uint256 punkIndex) external;
+}
+
 contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     using SafeERC20 for IERC20;
 
     enum AssetType {
         ERC20,
         ERC721,
-        ERC1155
+        ERC1155,
+        CryptoPunk
     }
 
     struct Asset {
@@ -44,6 +51,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     uint256 public constant MAX_PARTICIPANTS = 10;
     uint256 public constant MAX_ASSETS_PER_PARTICIPANT = 10;
     uint256 public constant TRADE_DURATION = 7 days;
+    address public constant CRYPTOPUNKS_ADDRESS = 0xb47e3cd837dDF8e4c57F05d70Ab865de6e193BBB;
     uint256 public flatFee = 0.005 ether;
     uint256 public accumulatedFees;
     address public feeRecipient;
@@ -171,6 +179,10 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
                 _amount,
                 ""
             );
+        } else if (_assetType == AssetType.CryptoPunk) {
+            require(_token == CRYPTOPUNKS_ADDRESS, "Invalid CryptoPunks address");
+            ICryptoPunks(CRYPTOPUNKS_ADDRESS).transferPunk(address(this), _tokenId);
+            emit CryptoPunkDeposited(_tradeId, msg.sender, _tokenId, _recipient);
         } else {
             revert UnsupportedAssetType();
         }
@@ -319,6 +331,8 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
                 asset.amount,
                 ""
             );
+        } else if (asset.assetType == AssetType.CryptoPunk) {
+            ICryptoPunks(CRYPTOPUNKS_ADDRESS).transferPunk(to, asset.tokenId);
         } else {
             revert UnsupportedAssetType();
         }
