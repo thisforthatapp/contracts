@@ -182,7 +182,6 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         } else if (_assetType == AssetType.CryptoPunk) {
             require(_token == CRYPTOPUNKS_ADDRESS, "Invalid CryptoPunks address");
             ICryptoPunks(CRYPTOPUNKS_ADDRESS).transferPunk(address(this), _tokenId);
-            emit CryptoPunkDeposited(_tradeId, msg.sender, _tokenId, _recipient);
         } else {
             revert UnsupportedAssetType();
         }
