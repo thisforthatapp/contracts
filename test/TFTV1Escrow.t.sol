@@ -17,19 +17,15 @@ contract TFTV1EscrowTest is Test {
     address public addr1;
     address public addr2;
     address public addr3;
-    address public feeRecipient;
-
-    uint256 public constant FLAT_FEE = 0.005 ether;
 
     function setUp() public {
         owner = address(this);
         addr1 = address(0x1);
         addr2 = address(0x2);
         addr3 = address(0x3);
-        feeRecipient = address(0x4);
 
         vm.startPrank(owner);
-        escrow = new TFTV1Escrow(feeRecipient);
+        escrow = new TFTV1Escrow();
         erc20Token = new MockERC20("MockToken", "MTK");
         erc721Token = new MockERC721("MockNFT", "MNFT");
         erc1155Token = new MockERC1155();
@@ -99,7 +95,7 @@ contract TFTV1EscrowTest is Test {
         vm.startPrank(addr1);
         uint256 tradeId = escrow.createTrade(participants, 0);
         erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset{value: FLAT_FEE}(
+        escrow.depositAsset(
             tradeId,
             address(erc20Token),
             0,
@@ -124,7 +120,7 @@ contract TFTV1EscrowTest is Test {
         vm.startPrank(addr1);
         uint256 tradeId = escrow.createTrade(participants, 0);
         erc721Token.approve(address(escrow), 1);
-        escrow.depositAsset{value: FLAT_FEE}(
+        escrow.depositAsset(
             tradeId,
             address(erc721Token),
             1,
@@ -149,7 +145,7 @@ contract TFTV1EscrowTest is Test {
         vm.startPrank(addr1);
         uint256 tradeId = escrow.createTrade(participants, 0);
         erc1155Token.setApprovalForAll(address(escrow), true);
-        escrow.depositAsset{value: FLAT_FEE}(
+        escrow.depositAsset(
             tradeId,
             address(erc1155Token),
             1,
@@ -174,7 +170,7 @@ contract TFTV1EscrowTest is Test {
         vm.startPrank(addr1);
         uint256 tradeId = escrow.createTrade(participants, 0);
         erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset{value: FLAT_FEE}(
+        escrow.depositAsset(
             tradeId,
             address(erc20Token),
             0,
@@ -188,7 +184,7 @@ contract TFTV1EscrowTest is Test {
         vm.startPrank(addr2);
         erc721Token.mint(addr2, 2);
         erc721Token.approve(address(escrow), 2);
-        escrow.depositAsset{value: FLAT_FEE}(
+        escrow.depositAsset(
             tradeId,
             address(erc721Token),
             2,
@@ -225,7 +221,7 @@ contract TFTV1EscrowTest is Test {
         vm.startPrank(addr1);
         uint256 tradeId = escrow.createTrade(participants, 0);
         erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset{value: FLAT_FEE}(
+        escrow.depositAsset(
             tradeId,
             address(erc20Token),
             0,
@@ -253,7 +249,7 @@ contract TFTV1EscrowTest is Test {
         vm.startPrank(addr1);
         uint256 tradeId = escrow.createTrade(participants, 1 days);
         erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset{value: FLAT_FEE}(
+        escrow.depositAsset(
             tradeId,
             address(erc20Token),
             0,
@@ -272,108 +268,6 @@ contract TFTV1EscrowTest is Test {
             erc20Token.balanceOf(addr1),
             initialBalance,
             "addr1 should have reclaimed their tokens"
-        );
-    }
-
-    function testWithdrawFees() public {
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
-
-        vm.prank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, 0);
-
-        vm.startPrank(addr1);
-        erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset{value: FLAT_FEE}(
-            tradeId,
-            address(erc20Token),
-            0,
-            100 ether,
-            TFTV1Escrow.AssetType.ERC20,
-            addr2
-        );
-        vm.stopPrank();
-
-        uint256 balanceBefore = feeRecipient.balance;
-        vm.prank(feeRecipient);
-        escrow.withdrawFees(FLAT_FEE);
-
-        assertEq(
-            feeRecipient.balance,
-            balanceBefore + FLAT_FEE,
-            "Fee recipient should have received the fee"
-        );
-    }
-
-    function testSetFlatFee() public {
-        uint256 newFee = 0.01 ether;
-        vm.prank(owner);
-        escrow.setFlatFee(newFee);
-
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
-
-        vm.prank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, 0);
-
-        vm.startPrank(addr1);
-        erc20Token.approve(address(escrow), 100 ether);
-        vm.expectRevert(
-            abi.encodeWithSelector(TFTV1Escrow.IncorrectFeeAmount.selector)
-        );
-        escrow.depositAsset{value: FLAT_FEE}(
-            tradeId,
-            address(erc20Token),
-            0,
-            100 ether,
-            TFTV1Escrow.AssetType.ERC20,
-            addr2
-        );
-        escrow.depositAsset{value: newFee}(
-            tradeId,
-            address(erc20Token),
-            0,
-            100 ether,
-            TFTV1Escrow.AssetType.ERC20,
-            addr2
-        );
-        vm.stopPrank();
-    }
-
-    function testSetFeeRecipient() public {
-        address newRecipient = address(0x5);
-        vm.prank(owner);
-        escrow.setFeeRecipient(newRecipient);
-
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
-
-        vm.prank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, 0);
-
-        vm.startPrank(addr1);
-        erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset{value: FLAT_FEE}(
-            tradeId,
-            address(erc20Token),
-            0,
-            100 ether,
-            TFTV1Escrow.AssetType.ERC20,
-            addr2
-        );
-        vm.stopPrank();
-
-        uint256 balanceBefore = newRecipient.balance;
-        vm.prank(newRecipient);
-        escrow.withdrawFees(FLAT_FEE);
-
-        assertEq(
-            newRecipient.balance,
-            balanceBefore + FLAT_FEE,
-            "New fee recipient should have received the fee"
         );
     }
 }
