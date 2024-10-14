@@ -9,9 +9,12 @@ import "./mocks/MockERC1155.sol";
 
 contract TFTV1EscrowTest is Test {
     TFTV1Escrow public escrow;
-    MockERC20 public erc20Token;
-    MockERC721 public erc721Token;
-    MockERC1155 public erc1155Token;
+    MockERC20 public mockERC20;
+    MockERC721 public mockERC721;
+    MockERC1155 public mockERC1155;
+    MockERC20 public anotherERC20;
+    MockERC721 public anotherERC721;
+    MockERC1155 public anotherERC1155;
 
     address public owner;
     address public addr1;
@@ -19,25 +22,31 @@ contract TFTV1EscrowTest is Test {
     address public addr3;
 
     function setUp() public {
+        escrow = new TFTV1Escrow();
+        mockERC20 = new MockERC20("MockToken", "MTK");
+        mockERC721 = new MockERC721("MockNFT", "MNFT");
+        mockERC1155 = new MockERC1155();
+        anotherERC20 = new MockERC20("AnotherToken", "ATK");
+        anotherERC721 = new MockERC721("AnotherNFT", "ANFT");
+        anotherERC1155 = new MockERC1155();
+
         owner = address(this);
         addr1 = address(0x1);
         addr2 = address(0x2);
         addr3 = address(0x3);
 
-        vm.startPrank(owner);
-        escrow = new TFTV1Escrow();
-        erc20Token = new MockERC20("MockToken", "MTK");
-        erc721Token = new MockERC721("MockNFT", "MNFT");
-        erc1155Token = new MockERC1155();
-        vm.stopPrank();
+        // Mint some tokens for testing
+        mockERC20.mint(addr1, 1000 ether);
+        mockERC20.mint(addr2, 1000 ether);
+        mockERC721.mint(addr1, 1);
+        mockERC721.mint(addr2, 2);
+        mockERC1155.mint(addr1, 1, 100, "");
+        mockERC1155.mint(addr2, 2, 50, "");
 
-        // Mint tokens for testing
-        erc20Token.mint(addr1, 1000 ether);
-        erc721Token.mint(addr1, 1);
-        erc1155Token.mint(addr1, 1, 100, "");
-
-        vm.deal(addr1, 100 ether);
-        vm.deal(addr2, 100 ether);
+        // Mint some "another" tokens for failure case testing
+        anotherERC20.mint(addr1, 1000 ether);
+        anotherERC721.mint(addr1, 1);
+        anotherERC1155.mint(addr1, 1, 100, "");
     }
 
     function testCreateTrade() public {
@@ -45,350 +54,288 @@ contract TFTV1EscrowTest is Test {
         participants[0] = addr1;
         participants[1] = addr2;
 
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](1);
-        assets1[0] = TFTV1Escrow.Asset(address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, addr2, false);
+        TFTV1Escrow.Asset[][] memory assets = new TFTV1Escrow.Asset[][](2);
+        assets[0] = new TFTV1Escrow.Asset[](2);
+        assets[1] = new TFTV1Escrow.Asset[](1);
 
-        TFTV1Escrow.Asset[] memory assets2 = new TFTV1Escrow.Asset[](1);
-        assets2[0] = TFTV1Escrow.Asset(address(erc721Token), 1, 1, TFTV1Escrow.AssetType.ERC721, addr1, false);
+        assets[0][0] = TFTV1Escrow.Asset({
+            token: address(mockERC20),
+            tokenId: 0,
+            amount: 100 ether,
+            assetType: TFTV1Escrow.AssetType.ERC20,
+            recipient: addr2,
+            isDeposited: false
+        });
 
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = assets2;
+        assets[0][1] = TFTV1Escrow.Asset({
+            token: address(mockERC1155),
+            tokenId: 1,
+            amount: 50,
+            assetType: TFTV1Escrow.AssetType.ERC1155,
+            recipient: addr2,
+            isDeposited: false
+        });
 
-        vm.prank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 7 days);
+        assets[1][0] = TFTV1Escrow.Asset({
+            token: address(mockERC721),
+            tokenId: 2,
+            amount: 1,
+            assetType: TFTV1Escrow.AssetType.ERC721,
+            recipient: addr1,
+            isDeposited: false
+        });
 
-        assertEq(tradeId, 0, "First trade should have ID 0");
+        uint256 tradeId = escrow.createTrade(participants, assets);
+
+        (bool isActive, uint256 depositedAssetCount, uint256 totalAssetCount) = escrow.getTradeStatus(tradeId);
+        assertTrue(isActive);
+        assertEq(depositedAssetCount, 0);
+        assertEq(totalAssetCount, 3);
     }
 
-    function testCreateTradeInvalidParticipantCount() public {
-        address[] memory participants = new address[](1);
-        participants[0] = addr1;
-
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](1);
-        allAssets[0] = new TFTV1Escrow.Asset[](0);
-
-        vm.expectRevert(abi.encodeWithSelector(TFTV1Escrow.InvalidParticipantCount.selector));
-        escrow.createTrade(participants, allAssets, 0);
-
-        participants = new address[](11);
-        allAssets = new TFTV1Escrow.Asset[][](11);
-        for (uint i = 0; i < 11; i++) {
-            participants[i] = address(uint160(i + 1));
-            allAssets[i] = new TFTV1Escrow.Asset[](0);
-        }
-
-        vm.expectRevert(abi.encodeWithSelector(TFTV1Escrow.InvalidParticipantCount.selector));
-        escrow.createTrade(participants, allAssets, 0);
-    }
-
-    function testCreateTradeInvalidDuration() public {
+    function testDepositAssets() public {
+        // Create a trade first
         address[] memory participants = new address[](2);
         participants[0] = addr1;
         participants[1] = addr2;
 
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = new TFTV1Escrow.Asset[](0);
-        allAssets[1] = new TFTV1Escrow.Asset[](0);
+        TFTV1Escrow.Asset[][] memory assets = new TFTV1Escrow.Asset[][](2);
+        assets[0] = new TFTV1Escrow.Asset[](2);
+        assets[1] = new TFTV1Escrow.Asset[](1);
 
-        vm.expectRevert(abi.encodeWithSelector(TFTV1Escrow.InvalidDuration.selector));
-        escrow.createTrade(participants, allAssets, 12 hours);
+        assets[0][0] = TFTV1Escrow.Asset({
+            token: address(mockERC20),
+            tokenId: 0,
+            amount: 100 ether,
+            assetType: TFTV1Escrow.AssetType.ERC20,
+            recipient: addr2,
+            isDeposited: false
+        });
 
-        vm.expectRevert(abi.encodeWithSelector(TFTV1Escrow.InvalidDuration.selector));
-        escrow.createTrade(participants, allAssets, 31 days);
-    }
+        assets[0][1] = TFTV1Escrow.Asset({
+            token: address(mockERC1155),
+            tokenId: 1,
+            amount: 50,
+            assetType: TFTV1Escrow.AssetType.ERC1155,
+            recipient: addr2,
+            isDeposited: false
+        });
 
-    function testDepositERC20() public {
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
+        assets[1][0] = TFTV1Escrow.Asset({
+            token: address(mockERC721),
+            tokenId: 2,
+            amount: 1,
+            assetType: TFTV1Escrow.AssetType.ERC721,
+            recipient: addr1,
+            isDeposited: false
+        });
 
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](1);
-        assets1[0] = TFTV1Escrow.Asset(address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, addr2, false);
+        uint256 tradeId = escrow.createTrade(participants, assets);
 
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = new TFTV1Escrow.Asset[](0);
-
+        // Approve and deposit assets
         vm.startPrank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 7 days);
-        erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
-        vm.stopPrank();
-
-        assertEq(erc20Token.balanceOf(address(escrow)), 100 ether, "Escrow should have received 100 tokens");
-    }
-
-    function testDepositERC721() public {
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
-
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](1);
-        assets1[0] = TFTV1Escrow.Asset(address(erc721Token), 1, 1, TFTV1Escrow.AssetType.ERC721, addr2, false);
-
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = new TFTV1Escrow.Asset[](0);
-
-        vm.startPrank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 0);
-        erc721Token.approve(address(escrow), 1);
-        escrow.depositAsset(tradeId, address(erc721Token), 1, 1, TFTV1Escrow.AssetType.ERC721);
-        vm.stopPrank();
-
-        assertEq(erc721Token.ownerOf(1), address(escrow), "Escrow should own the NFT");
-    }
-
-    function testDepositERC1155() public {
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
-
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](1);
-        assets1[0] = TFTV1Escrow.Asset(address(erc1155Token), 1, 50, TFTV1Escrow.AssetType.ERC1155, addr2, false);
-
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = new TFTV1Escrow.Asset[](0);
-
-        vm.startPrank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 0);
-        erc1155Token.setApprovalForAll(address(escrow), true);
-        escrow.depositAsset(tradeId, address(erc1155Token), 1, 50, TFTV1Escrow.AssetType.ERC1155);
-        vm.stopPrank();
-
-        assertEq(erc1155Token.balanceOf(address(escrow), 1), 50, "Escrow should have received 50 tokens");
-    }
-
-    function testConfirmTrade() public {
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
-
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](1);
-        assets1[0] = TFTV1Escrow.Asset(address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, addr2, false);
-
-        TFTV1Escrow.Asset[] memory assets2 = new TFTV1Escrow.Asset[](1);
-        assets2[0] = TFTV1Escrow.Asset(address(erc721Token), 2, 1, TFTV1Escrow.AssetType.ERC721, addr1, false);
-
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = assets2;
-
-        vm.startPrank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 0);
-        erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
-        escrow.confirmTrade(tradeId);
+        mockERC20.approve(address(escrow), 100 ether);
+        escrow.depositAsset(tradeId, address(mockERC20), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
+        mockERC1155.setApprovalForAll(address(escrow), true);
+        escrow.depositAsset(tradeId, address(mockERC1155), 1, 50, TFTV1Escrow.AssetType.ERC1155);
         vm.stopPrank();
 
         vm.startPrank(addr2);
-        erc721Token.mint(addr2, 2);
-        erc721Token.approve(address(escrow), 2);
-        escrow.depositAsset(tradeId, address(erc721Token), 2, 1, TFTV1Escrow.AssetType.ERC721);
+        mockERC721.approve(address(escrow), 2);
+        escrow.depositAsset(tradeId, address(mockERC721), 2, 1, TFTV1Escrow.AssetType.ERC721);
         vm.stopPrank();
 
-        // Check balances before final confirmation
-        uint256 addr2ERC20BalanceBefore = erc20Token.balanceOf(addr2);
-        address nftOwnerBefore = erc721Token.ownerOf(2);
+        // Check trade status
+        (bool isActive, uint256 depositedAssetCount, uint256 totalAssetCount) = escrow.getTradeStatus(tradeId);
+        assertFalse(isActive);
+        assertEq(depositedAssetCount, 3);
+        assertEq(totalAssetCount, 3);
 
-        // Final confirmation and trade execution
-        vm.prank(addr2);
-        escrow.confirmTrade(tradeId);
-
-        // Check final balances
-        assertEq(erc20Token.balanceOf(addr2), addr2ERC20BalanceBefore + 100 ether, "addr2 should have received 100 ERC20 tokens");
-        assertEq(erc721Token.ownerOf(2), addr1, "addr1 should own the NFT");
+        // Check balances after trade execution
+        assertEq(mockERC20.balanceOf(addr2), 1100 ether);
+        assertEq(mockERC721.ownerOf(2), addr1);
+        assertEq(mockERC1155.balanceOf(addr2, 1), 50);
     }
 
     function testCancelTrade() public {
+        // Create a trade first
         address[] memory participants = new address[](2);
         participants[0] = addr1;
         participants[1] = addr2;
 
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](1);
-        assets1[0] = TFTV1Escrow.Asset(address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, addr2, false);
+        TFTV1Escrow.Asset[][] memory assets = new TFTV1Escrow.Asset[][](2);
+        assets[0] = new TFTV1Escrow.Asset[](2);
+        assets[1] = new TFTV1Escrow.Asset[](1);
 
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = new TFTV1Escrow.Asset[](0);
+        assets[0][0] = TFTV1Escrow.Asset({
+            token: address(mockERC20),
+            tokenId: 0,
+            amount: 100 ether,
+            assetType: TFTV1Escrow.AssetType.ERC20,
+            recipient: addr2,
+            isDeposited: false
+        });
 
-        uint256 initialBalance = erc20Token.balanceOf(addr1);
+        assets[0][1] = TFTV1Escrow.Asset({
+            token: address(mockERC1155),
+            tokenId: 1,
+            amount: 50,
+            assetType: TFTV1Escrow.AssetType.ERC1155,
+            recipient: addr2,
+            isDeposited: false
+        });
 
+        assets[1][0] = TFTV1Escrow.Asset({
+            token: address(mockERC721),
+            tokenId: 2,
+            amount: 1,
+            assetType: TFTV1Escrow.AssetType.ERC721,
+            recipient: addr1,
+            isDeposited: false
+        });
+
+        uint256 tradeId = escrow.createTrade(participants, assets);
+
+        // Deposit two assets
         vm.startPrank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 0);
-        erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
+        mockERC20.approve(address(escrow), 100 ether);
+        escrow.depositAsset(tradeId, address(mockERC20), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
+        mockERC1155.setApprovalForAll(address(escrow), true);
+        escrow.depositAsset(tradeId, address(mockERC1155), 1, 50, TFTV1Escrow.AssetType.ERC1155);
+        vm.stopPrank();
+
+        // Cancel trade
+        vm.prank(addr2);
         escrow.cancelTrade(tradeId);
-        vm.stopPrank();
 
-        assertEq(erc20Token.balanceOf(addr1), initialBalance, "addr1 should have received back their tokens");
+        // Check trade status
+        (bool isActive, uint256 depositedAssetCount, uint256 totalAssetCount) = escrow.getTradeStatus(tradeId);
+        assertFalse(isActive);
+        assertEq(depositedAssetCount, 0);
+        assertEq(totalAssetCount, 3);
+
+        // Check balances after cancellation
+        assertEq(mockERC20.balanceOf(addr1), 1000 ether);
+        assertEq(mockERC721.ownerOf(2), addr2);
+        assertEq(mockERC1155.balanceOf(addr1, 1), 100);
     }
 
-    function testReclaimAssets() public {
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
-
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](1);
-        assets1[0] = TFTV1Escrow.Asset(address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, addr2, false);
-
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = new TFTV1Escrow.Asset[](0);
-
-        uint256 initialBalance = erc20Token.balanceOf(addr1);
+    function testFailDepositIncorrectERC20() public {
+        uint256 tradeId = _createBasicTrade();
 
         vm.startPrank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 1 days);
-        erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
+        anotherERC20.approve(address(escrow), 100 ether);
+        vm.expectRevert(TFTV1Escrow.AssetNotFound.selector);
+        escrow.depositAsset(tradeId, address(anotherERC20), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
         vm.stopPrank();
-
-        vm.warp(block.timestamp + 2 days);
-
-        vm.prank(addr1);
-        escrow.reclaimAssets(tradeId);
-
-        assertEq(erc20Token.balanceOf(addr1), initialBalance, "addr1 should have reclaimed their tokens");
     }
 
-    function testBatchDepositAssets() public {
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
-
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](3);
-        assets1[0] = TFTV1Escrow.Asset(address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, addr2, false);
-        assets1[1] = TFTV1Escrow.Asset(address(erc721Token), 1, 1, TFTV1Escrow.AssetType.ERC721, addr2, false);
-        assets1[2] = TFTV1Escrow.Asset(address(erc1155Token), 1, 50, TFTV1Escrow.AssetType.ERC1155, addr2, false);
-
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = new TFTV1Escrow.Asset[](0);
-
-        vm.startPrank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 7 days);
-        erc20Token.approve(address(escrow), 100 ether);
-        erc721Token.approve(address(escrow), 1);
-        erc1155Token.setApprovalForAll(address(escrow), true);
-        escrow.batchDepositAssets(tradeId);
-        vm.stopPrank();
-
-        assertEq(erc20Token.balanceOf(address(escrow)), 100 ether, "Escrow should have received 100 ERC20 tokens");
-        assertEq(erc721Token.ownerOf(1), address(escrow), "Escrow should own the ERC721 token");
-        assertEq(erc1155Token.balanceOf(address(escrow), 1), 50, "Escrow should have received 50 ERC1155 tokens");
-    }
-
-    function testAreAllAssetsDeposited() public {
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
-
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](1);
-        assets1[0] = TFTV1Escrow.Asset(address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, addr2, false);
-
-        TFTV1Escrow.Asset[] memory assets2 = new TFTV1Escrow.Asset[](1);
-        assets2[0] = TFTV1Escrow.Asset(address(erc721Token), 2, 1, TFTV1Escrow.AssetType.ERC721, addr1, false);
-
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = assets2;
-
-        vm.prank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 0);
-
-        assertFalse(escrow.areAllAssetsDeposited(tradeId), "All assets should not be deposited initially");
-
-        vm.startPrank(addr1);
-        erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
-        vm.stopPrank();
-
-        assertFalse(escrow.areAllAssetsDeposited(tradeId), "All assets should not be deposited after addr1's deposit");
+    function testFailDepositIncorrectERC721() public {
+        uint256 tradeId = _createBasicTrade();
 
         vm.startPrank(addr2);
-        erc721Token.mint(addr2, 2);
-        erc721Token.approve(address(escrow), 2);
-        escrow.depositAsset(tradeId, address(erc721Token), 2, 1, TFTV1Escrow.AssetType.ERC721);
+        anotherERC721.approve(address(escrow), 1);
+        vm.expectRevert(TFTV1Escrow.AssetNotFound.selector);
+        escrow.depositAsset(tradeId, address(anotherERC721), 1, 1, TFTV1Escrow.AssetType.ERC721);
         vm.stopPrank();
-
-        assertTrue(escrow.areAllAssetsDeposited(tradeId), "All assets should be deposited");
     }
 
-    function testDepositAssetNotInTrade() public {
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
-
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](1);
-        assets1[0] = TFTV1Escrow.Asset(address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, addr2, false);
-
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = new TFTV1Escrow.Asset[](0);
-
-        vm.prank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 0);
-
-        vm.expectRevert(abi.encodeWithSelector(TFTV1Escrow.AssetNotFound.selector));
-        vm.prank(addr1);
-        escrow.depositAsset(tradeId, address(erc721Token), 1, 1, TFTV1Escrow.AssetType.ERC721);
-    }
-
-    function testConfirmTradeBeforeAllAssetsDeposited() public {
-        address[] memory participants = new address[](2);
-        participants[0] = addr1;
-        participants[1] = addr2;
-
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](1);
-        assets1[0] = TFTV1Escrow.Asset(address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, addr2, false);
-
-        TFTV1Escrow.Asset[] memory assets2 = new TFTV1Escrow.Asset[](1);
-        assets2[0] = TFTV1Escrow.Asset(address(erc721Token), 2, 1, TFTV1Escrow.AssetType.ERC721, addr1, false);
-
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = assets2;
-
-        vm.prank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 0);
+    function testFailDepositIncorrectERC1155() public {
+        uint256 tradeId = _createBasicTrade();
 
         vm.startPrank(addr1);
-        erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
+        anotherERC1155.setApprovalForAll(address(escrow), true);
+        vm.expectRevert(TFTV1Escrow.AssetNotFound.selector);
+        escrow.depositAsset(tradeId, address(anotherERC1155), 1, 50, TFTV1Escrow.AssetType.ERC1155);
         vm.stopPrank();
-
-        vm.expectRevert(abi.encodeWithSelector(TFTV1Escrow.AssetsNotFullyDeposited.selector));
-        vm.prank(addr1);
-        escrow.confirmTrade(tradeId);
     }
 
-    function testCancelTradeAfterPartialDeposit() public {
+    function testFailDepositIncorrectTokenId() public {
+        uint256 tradeId = _createBasicTrade();
+
+        vm.startPrank(addr2);
+        mockERC721.approve(address(escrow), 3);
+        vm.expectRevert(TFTV1Escrow.AssetNotFound.selector);
+        escrow.depositAsset(tradeId, address(mockERC721), 3, 1, TFTV1Escrow.AssetType.ERC721);
+        vm.stopPrank();
+    }
+
+    function testFailDepositIncorrectAmount() public {
+        uint256 tradeId = _createBasicTrade();
+
+        vm.startPrank(addr1);
+        mockERC20.approve(address(escrow), 200 ether);
+        vm.expectRevert(TFTV1Escrow.AssetNotFound.selector);
+        escrow.depositAsset(tradeId, address(mockERC20), 0, 200 ether, TFTV1Escrow.AssetType.ERC20);
+        vm.stopPrank();
+    }
+
+    function testFailDepositAssetTwice() public {
+        uint256 tradeId = _createBasicTrade();
+
+        vm.startPrank(addr1);
+        mockERC20.approve(address(escrow), 200 ether);
+        escrow.depositAsset(tradeId, address(mockERC20), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
+        vm.expectRevert(TFTV1Escrow.AssetAlreadyDeposited.selector);
+        escrow.depositAsset(tradeId, address(mockERC20), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
+        vm.stopPrank();
+    }
+
+    function testFailDepositAfterTradeCompleted() public {
+        uint256 tradeId = _createBasicTrade();
+
+        // Complete the trade
+        vm.prank(addr1);
+        mockERC20.approve(address(escrow), 100 ether);
+        escrow.depositAsset(tradeId, address(mockERC20), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
+
+        vm.prank(addr2);
+        mockERC721.approve(address(escrow), 2);
+        escrow.depositAsset(tradeId, address(mockERC721), 2, 1, TFTV1Escrow.AssetType.ERC721);
+
+        // Try to deposit after trade is completed
+        vm.prank(addr1);
+        mockERC1155.setApprovalForAll(address(escrow), true);
+        vm.expectRevert(TFTV1Escrow.TradeNotActive.selector);
+        escrow.depositAsset(tradeId, address(mockERC1155), 1, 50, TFTV1Escrow.AssetType.ERC1155);
+    }
+
+    function _createBasicTrade() internal returns (uint256) {
         address[] memory participants = new address[](2);
         participants[0] = addr1;
         participants[1] = addr2;
 
-        TFTV1Escrow.Asset[] memory assets1 = new TFTV1Escrow.Asset[](1);
-        assets1[0] = TFTV1Escrow.Asset(address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, addr2, false);
+        TFTV1Escrow.Asset[][] memory assets = new TFTV1Escrow.Asset[][](2);
+        assets[0] = new TFTV1Escrow.Asset[](2);
+        assets[1] = new TFTV1Escrow.Asset[](1);
 
-        TFTV1Escrow.Asset[] memory assets2 = new TFTV1Escrow.Asset[](1);
-        assets2[0] = TFTV1Escrow.Asset(address(erc721Token), 2, 1, TFTV1Escrow.AssetType.ERC721, addr1, false);
+        assets[0][0] = TFTV1Escrow.Asset({
+            token: address(mockERC20),
+            tokenId: 0,
+            amount: 100 ether,
+            assetType: TFTV1Escrow.AssetType.ERC20,
+            recipient: addr2,
+            isDeposited: false
+        });
 
-        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
-        allAssets[0] = assets1;
-        allAssets[1] = assets2;
+        assets[0][1] = TFTV1Escrow.Asset({
+            token: address(mockERC1155),
+            tokenId: 1,
+            amount: 50,
+            assetType: TFTV1Escrow.AssetType.ERC1155,
+            recipient: addr2,
+            isDeposited: false
+        });
 
-        vm.startPrank(addr1);
-        uint256 tradeId = escrow.createTrade(participants, allAssets, 0);
-        erc20Token.approve(address(escrow), 100 ether);
-        escrow.depositAsset(tradeId, address(erc20Token), 0, 100 ether, TFTV1Escrow.AssetType.ERC20);
-        uint256 balanceBeforeCancel = erc20Token.balanceOf(addr1);
-        escrow.cancelTrade(tradeId);
-        vm.stopPrank();
+        assets[1][0] = TFTV1Escrow.Asset({
+            token: address(mockERC721),
+            tokenId: 2,
+            amount: 1,
+            assetType: TFTV1Escrow.AssetType.ERC721,
+            recipient: addr1,
+            isDeposited: false
+        });
 
-        assertEq(erc20Token.balanceOf(addr1), balanceBeforeCancel + 100 ether, "addr1 should have received back their tokens");
-        assertTrue(escrow.areAllAssetsDeposited(tradeId) == false, "Trade should be cancelled and assets reclaimed");
+        return escrow.createTrade(participants, assets);
     }
 }
