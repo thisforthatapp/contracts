@@ -1,6 +1,5 @@
-// File: script/SimulateTFTV1Escrow.s.sol
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.25;
+pragma solidity ^0.8.27;
 
 import "forge-std/Script.sol";
 import "../src/TFTV1Escrow.sol";
@@ -50,7 +49,22 @@ contract SimulateTFTV1Escrow is Script {
         address[] memory participants = new address[](2);
         participants[0] = alice;
         participants[1] = bob;
-        uint256 tradeId = escrow.createTrade(participants, 1 days);
+
+        TFTV1Escrow.Asset[] memory aliceAssets = new TFTV1Escrow.Asset[](3);
+        aliceAssets[0] = TFTV1Escrow.Asset(address(erc20), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, bob, false);
+        aliceAssets[1] = TFTV1Escrow.Asset(address(erc721), 1, 1, TFTV1Escrow.AssetType.ERC721, bob, false);
+        aliceAssets[2] = TFTV1Escrow.Asset(address(erc1155), 1, 50, TFTV1Escrow.AssetType.ERC1155, bob, false);
+
+        TFTV1Escrow.Asset[] memory bobAssets = new TFTV1Escrow.Asset[](3);
+        bobAssets[0] = TFTV1Escrow.Asset(address(erc20), 0, 50 ether, TFTV1Escrow.AssetType.ERC20, alice, false);
+        bobAssets[1] = TFTV1Escrow.Asset(address(erc721), 2, 1, TFTV1Escrow.AssetType.ERC721, alice, false);
+        bobAssets[2] = TFTV1Escrow.Asset(address(erc1155), 2, 25, TFTV1Escrow.AssetType.ERC1155, alice, false);
+
+        TFTV1Escrow.Asset[][] memory allAssets = new TFTV1Escrow.Asset[][](2);
+        allAssets[0] = aliceAssets;
+        allAssets[1] = bobAssets;
+
+        uint256 tradeId = escrow.createTrade(participants, allAssets, 1 days);
         console.log("Trade created with ID:", tradeId);
 
         // Alice deposits assets
@@ -58,10 +72,7 @@ contract SimulateTFTV1Escrow is Script {
         erc721.setApprovalForAll(address(escrow), true);
         erc1155.setApprovalForAll(address(escrow), true);
 
-        escrow.depositAsset{value: 0.005 ether}(tradeId, address(erc20), 0, 100 ether, TFTV1Escrow.AssetType.ERC20, bob);
-        escrow.depositAsset{value: 0.005 ether}(tradeId, address(erc721), 1, 1, TFTV1Escrow.AssetType.ERC721, bob);
-        escrow.depositAsset{value: 0.005 ether}(tradeId, address(erc1155), 1, 50, TFTV1Escrow.AssetType.ERC1155, bob);
-
+        escrow.batchDepositAssets(tradeId);
         escrow.confirmTrade(tradeId);
         console.log("Alice deposited assets and confirmed trade");
         vm.stopBroadcast();
@@ -72,10 +83,7 @@ contract SimulateTFTV1Escrow is Script {
         erc721.setApprovalForAll(address(escrow), true);
         erc1155.setApprovalForAll(address(escrow), true);
 
-        escrow.depositAsset{value: 0.005 ether}(tradeId, address(erc20), 0, 50 ether, TFTV1Escrow.AssetType.ERC20, alice);
-        escrow.depositAsset{value: 0.005 ether}(tradeId, address(erc721), 2, 1, TFTV1Escrow.AssetType.ERC721, alice);
-        escrow.depositAsset{value: 0.005 ether}(tradeId, address(erc1155), 2, 25, TFTV1Escrow.AssetType.ERC1155, alice);
-
+        escrow.batchDepositAssets(tradeId);
         escrow.confirmTrade(tradeId);
         console.log("Bob deposited assets and confirmed trade");
         vm.stopBroadcast();

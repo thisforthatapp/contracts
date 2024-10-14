@@ -10,7 +10,6 @@ import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
-// Interface for CryptoPunks contract
 interface ICryptoPunks {
     function punkIndexToAddress(uint256 punkIndex) external view returns (address);
     function transferPunk(address to, uint256 punkIndex) external;
@@ -19,12 +18,7 @@ interface ICryptoPunks {
 contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     using SafeERC20 for IERC20;
 
-    enum AssetType {
-        ERC20,
-        ERC721,
-        ERC1155,
-        CryptoPunk
-    }
+    enum AssetType { ERC20, ERC721, ERC1155, CryptoPunk }
 
     struct Asset {
         address token;
@@ -32,6 +26,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         uint256 amount;
         AssetType assetType;
         address recipient;
+        bool isDeposited;
     }
 
     struct Trade {
@@ -51,20 +46,8 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     uint256 public constant TRADE_DURATION = 7 days;
     address public constant CRYPTOPUNKS_ADDRESS = 0xb47e3cd837dDF8e4c57F05d70Ab865de6e193BBB;
 
-    event TradeCreated(
-        uint256 indexed tradeId,
-        address[] participants,
-        uint256 duration
-    );
-    event AssetDeposited(
-        uint256 indexed tradeId,
-        address participant,
-        address token,
-        uint256 tokenId,
-        uint256 amount,
-        AssetType assetType,
-        address recipient
-    );
+    event TradeCreated(uint256 indexed tradeId, address[] participants, uint256 duration);
+    event AssetDeposited(uint256 indexed tradeId, address participant, address token, uint256 tokenId, uint256 amount, AssetType assetType, address recipient);
     event AssetsReclaimed(uint256 indexed tradeId, address participant);
     event TradeConfirmed(uint256 indexed tradeId, address participant);
     event TradeCompleted(uint256 indexed tradeId);
@@ -83,39 +66,45 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     error InvalidRecipientAddress();
     error InvalidTokenAddress();
     error UnsupportedAssetType();
+    error AssetAlreadyDeposited();
+    error AssetNotFound();
+    error AssetsNotFullyDeposited();
 
     constructor() Ownable(msg.sender) {}
 
     function createTrade(
         address[] memory _participants,
+        Asset[][] memory _assets,
         uint256 _duration
     ) external returns (uint256) {
-        if (
-            _participants.length < 2 || _participants.length > MAX_PARTICIPANTS
-        ) {
+        if (_participants.length < 2 || _participants.length > MAX_PARTICIPANTS) {
             revert InvalidParticipantCount();
         }
 
-        // Set default duration if not specified
         if (_duration == 0) {
             _duration = TRADE_DURATION;
         }
 
-        // Ensure duration is within 1 day to 30 days
         if (_duration < 1 days || _duration > 30 days) {
             revert InvalidDuration();
         }
 
         uint256 tradeId = tradeCounter++;
 
-        for (uint i = 0; i < _participants.length; i++) {
-            isParticipant[tradeId][_participants[i]] = true;
-        }
-
         Trade storage newTrade = trades[tradeId];
         newTrade.participants = _participants;
         newTrade.isActive = true;
         newTrade.deadline = block.timestamp + _duration;
+
+        for (uint i = 0; i < _participants.length; i++) {
+            isParticipant[tradeId][_participants[i]] = true;
+            if (_assets[i].length > MAX_ASSETS_PER_PARTICIPANT) {
+                revert MaxAssetsPerParticipantExceeded();
+            }
+            for (uint j = 0; j < _assets[i].length; j++) {
+                newTrade.assets[_participants[i]].push(_assets[i][j]);
+            }
+        }
 
         emit TradeCreated(tradeId, _participants, _duration);
         return tradeId;
@@ -126,54 +115,45 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         address _token,
         uint256 _tokenId,
         uint256 _amount,
-        AssetType _assetType,
-        address _recipient
+        AssetType _assetType
     ) external nonReentrant {
         Trade storage trade = trades[_tradeId];
         if (!trade.isActive) revert TradeNotActive();
         if (block.timestamp >= trade.deadline) revert TradeDeadlinePassed();
         if (!isParticipant[_tradeId][msg.sender]) revert NotParticipant();
-        if (!isParticipant[_tradeId][_recipient]) revert NotParticipant();
-        if (trade.assets[msg.sender].length >= MAX_ASSETS_PER_PARTICIPANT)
-            revert MaxAssetsPerParticipantExceeded();
-        if (_recipient == address(0)) revert InvalidRecipientAddress();
-        if (_token == address(0)) revert InvalidTokenAddress();
 
-        if (_assetType == AssetType.ERC20) {
-            IERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
-        } else if (_assetType == AssetType.ERC721) {
-            IERC721(_token).safeTransferFrom(
-                msg.sender,
-                address(this),
-                _tokenId
-            );
-        } else if (_assetType == AssetType.ERC1155) {
-            IERC1155(_token).safeTransferFrom(
-                msg.sender,
-                address(this),
-                _tokenId,
-                _amount,
-                ""
-            );
-        } else if (_assetType == AssetType.CryptoPunk) {
-            require(_token == CRYPTOPUNKS_ADDRESS, "Invalid CryptoPunks address");
-            ICryptoPunks(CRYPTOPUNKS_ADDRESS).transferPunk(address(this), _tokenId);
-        } else {
-            revert UnsupportedAssetType();
+        Asset[] storage assets = trade.assets[msg.sender];
+        bool assetFound = false;
+        for (uint i = 0; i < assets.length; i++) {
+            Asset storage asset = assets[i];
+            if (asset.token == _token && asset.tokenId == _tokenId && asset.assetType == _assetType) {
+                if (asset.isDeposited) revert AssetAlreadyDeposited();
+                _transferAsset(asset, msg.sender, address(this));
+                asset.isDeposited = true;
+                assetFound = true;
+                emit AssetDeposited(_tradeId, msg.sender, _token, _tokenId, _amount, _assetType, asset.recipient);
+                break;
+            }
         }
 
-        trade.assets[msg.sender].push(
-            Asset(_token, _tokenId, _amount, _assetType, _recipient)
-        );
-        emit AssetDeposited(
-            _tradeId,
-            msg.sender,
-            _token,
-            _tokenId,
-            _amount,
-            _assetType,
-            _recipient
-        );
+        if (!assetFound) revert AssetNotFound();
+    }
+
+    function batchDepositAssets(uint256 _tradeId) external nonReentrant {
+        Trade storage trade = trades[_tradeId];
+        if (!trade.isActive) revert TradeNotActive();
+        if (block.timestamp >= trade.deadline) revert TradeDeadlinePassed();
+        if (!isParticipant[_tradeId][msg.sender]) revert NotParticipant();
+
+        Asset[] storage assets = trade.assets[msg.sender];
+        for (uint i = 0; i < assets.length; i++) {
+            Asset storage asset = assets[i];
+            if (!asset.isDeposited) {
+                _transferAsset(asset, msg.sender, address(this));
+                asset.isDeposited = true;
+                emit AssetDeposited(_tradeId, msg.sender, asset.token, asset.tokenId, asset.amount, asset.assetType, asset.recipient);
+            }
+        }
     }
 
     function confirmTrade(uint256 _tradeId) external nonReentrant {
@@ -182,7 +162,11 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         if (block.timestamp >= trade.deadline) revert TradeDeadlinePassed();
         if (!isParticipant[_tradeId][msg.sender]) revert NotParticipant();
         if (trade.hasConfirmed[msg.sender]) revert AlreadyConfirmed();
-        if (trade.assets[msg.sender].length == 0) revert NoAssetsDeposited();
+
+        Asset[] storage assets = trade.assets[msg.sender];
+        for (uint i = 0; i < assets.length; i++) {
+            if (!assets[i].isDeposited) revert AssetsNotFullyDeposited();
+        }
 
         trade.hasConfirmed[msg.sender] = true;
         trade.confirmations++;
@@ -206,10 +190,12 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
             address participant = trade.participants[i];
             Asset[] storage assets = trade.assets[participant];
             for (uint j = 0; j < assets.length; j++) {
-                Asset memory asset = assets[j];
-                _transferAsset(asset, address(this), participant);
+                Asset storage asset = assets[j];
+                if (asset.isDeposited) {
+                    _transferAsset(asset, address(this), participant);
+                    asset.isDeposited = false;
+                }
             }
-            delete trade.assets[participant];
         }
 
         emit TradeCancelled(_tradeId);
@@ -226,10 +212,10 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
             Asset[] storage assets = trade.assets[from];
 
             for (uint j = 0; j < assets.length; j++) {
-                Asset memory asset = assets[j];
+                Asset storage asset = assets[j];
                 _transferAsset(asset, address(this), asset.recipient);
+                asset.isDeposited = false;
             }
-            delete trade.assets[from];
         }
 
         emit TradeCompleted(_tradeId);
@@ -243,23 +229,30 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         if (!isParticipant[_tradeId][msg.sender]) revert NotParticipant();
 
         Asset[] storage assets = trade.assets[msg.sender];
-        if (assets.length == 0) revert NoAssetsToReclaim();
-
+        bool assetsReclaimed = false;
         for (uint i = 0; i < assets.length; i++) {
-            Asset memory asset = assets[i];
-            _transferAsset(asset, address(this), msg.sender);
+            Asset storage asset = assets[i];
+            if (asset.isDeposited) {
+                _transferAsset(asset, address(this), msg.sender);
+                asset.isDeposited = false;
+                assetsReclaimed = true;
+            }
         }
-        delete trade.assets[msg.sender];
+
+        if (!assetsReclaimed) revert NoAssetsToReclaim();
 
         emit AssetsReclaimed(_tradeId, msg.sender);
 
-        // Check if all participants have reclaimed their assets
         bool allAssetsReclaimed = true;
         for (uint i = 0; i < trade.participants.length; i++) {
-            if (trade.assets[trade.participants[i]].length > 0) {
-                allAssetsReclaimed = false;
-                break;
+            Asset[] storage participantAssets = trade.assets[trade.participants[i]];
+            for (uint j = 0; j < participantAssets.length; j++) {
+                if (participantAssets[j].isDeposited) {
+                    allAssetsReclaimed = false;
+                    break;
+                }
             }
+            if (!allAssetsReclaimed) break;
         }
         if (allAssetsReclaimed) {
             trade.isActive = false;
@@ -273,21 +266,28 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         address to
     ) internal {
         if (asset.assetType == AssetType.ERC20) {
-            IERC20(asset.token).safeTransfer(to, asset.amount);
+            IERC20(asset.token).safeTransferFrom(from, to, asset.amount);
         } else if (asset.assetType == AssetType.ERC721) {
             IERC721(asset.token).safeTransferFrom(from, to, asset.tokenId);
         } else if (asset.assetType == AssetType.ERC1155) {
-            IERC1155(asset.token).safeTransferFrom(
-                from,
-                to,
-                asset.tokenId,
-                asset.amount,
-                ""
-            );
+            IERC1155(asset.token).safeTransferFrom(from, to, asset.tokenId, asset.amount, "");
         } else if (asset.assetType == AssetType.CryptoPunk) {
             ICryptoPunks(CRYPTOPUNKS_ADDRESS).transferPunk(to, asset.tokenId);
         } else {
             revert UnsupportedAssetType();
         }
+    }
+
+    function areAllAssetsDeposited(uint256 _tradeId) external view returns (bool) {
+        Trade storage trade = trades[_tradeId];
+        for (uint i = 0; i < trade.participants.length; i++) {
+            Asset[] storage assets = trade.assets[trade.participants[i]];
+            for (uint j = 0; j < assets.length; j++) {
+                if (!assets[j].isDeposited) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 }

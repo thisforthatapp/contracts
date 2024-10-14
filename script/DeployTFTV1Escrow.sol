@@ -11,11 +11,10 @@ import "../test/mocks/MockERC1155.sol";
 contract DeployTFTV1Escrow is Script {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address feeRecipient = vm.envAddress("FEE_RECIPIENT");
 
         vm.startBroadcast(deployerPrivateKey);
 
-        TFTV1Escrow escrow = new TFTV1Escrow(feeRecipient);
+        TFTV1Escrow escrow = new TFTV1Escrow();
 
         // Deploy mock tokens for testing
         MockERC20 erc20 = new MockERC20("Mock ERC20", "MERC20");
