@@ -185,4 +185,26 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         Trade storage trade = trades[_tradeId];
         return (trade.isActive, trade.depositedAssetCount, trade.totalAssetCount);
     }
+
+    function getTradeAssets(uint256 _tradeId) external view returns (
+        address[] memory participants,
+        Asset[][] memory assets,
+        bool isActive,
+        uint256 depositedAssetCount,
+        uint256 totalAssetCount
+    ) {
+        Trade storage trade = trades[_tradeId];
+        if (trade.participants.length == 0) revert TradeNotFound();
+
+        participants = trade.participants;
+        assets = new Asset[][](participants.length);
+
+        for (uint i = 0; i < participants.length; i++) {
+            assets[i] = trade.assets[participants[i]];
+        }
+
+        isActive = trade.isActive;
+        depositedAssetCount = trade.depositedAssetCount;
+        totalAssetCount = trade.totalAssetCount;
+    }
 }
