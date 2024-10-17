@@ -56,6 +56,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     error AssetAlreadyDeposited();
     error AssetNotFound();
     error UnsupportedAssetType();
+    error TradeNotFound();
 
     constructor() Ownable(msg.sender) {}
 
