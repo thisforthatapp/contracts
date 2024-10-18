@@ -15,6 +15,10 @@ interface ICryptoPunks {
     function transferPunk(address to, uint256 punkIndex) external;
 }
 
+/**
+ * @title TFTV1Escrow
+ * @dev A contract for facilitating multi-party trades of various asset types (ERC20, ERC721, ERC1155, CryptoPunks)
+ */
 contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     using SafeERC20 for IERC20;
 
@@ -60,6 +64,12 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
 
     constructor() Ownable(msg.sender) {}
 
+    /**
+     * @dev Creates a new trade with the given participants and assets
+     * @param _participants Array of participant addresses
+     * @param _assets 2D array of assets, where each inner array corresponds to a participant
+     * @return tradeId The ID of the newly created trade
+     */
     function createTrade(
         address[] memory _participants,
         Asset[][] memory _assets
@@ -89,6 +99,14 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         return tradeId;
     }
 
+    /**
+     * @dev Allows a participant to deposit an asset for a trade
+     * @param _tradeId The ID of the trade
+     * @param _token The address of the token contract
+     * @param _tokenId The ID of the token (for ERC721 and ERC1155)
+     * @param _amount The amount of tokens (for ERC20 and ERC1155)
+     * @param _assetType The type of asset being deposited
+     */
     function depositAsset(
         uint256 _tradeId,
         address _token,
@@ -118,30 +136,14 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         if (!assetFound) revert AssetNotFound();
 
         if (trade.depositedAssetCount == trade.totalAssetCount) {
-            executeTrade(_tradeId);
+            _executeTrade(_tradeId);
         }
     }
 
-    function executeTrade(uint256 _tradeId) internal {
-        Trade storage trade = trades[_tradeId];
-        uint256 participantCount = trade.participants.length;
-
-        trade.isActive = false;
-
-        for (uint i = 0; i < participantCount; i++) {
-            address from = trade.participants[i];
-            Asset[] storage assets = trade.assets[from];
-
-            for (uint j = 0; j < assets.length; j++) {
-                Asset storage asset = assets[j];
-                _transferAsset(asset, address(this), asset.recipient);
-                asset.isDeposited = false;
-            }
-        }
-
-        emit TradeCompleted(_tradeId);
-    }
-
+    /**
+     * @dev Cancels an active trade and returns deposited assets to their owners
+     * @param _tradeId The ID of the trade to cancel
+     */
     function cancelTrade(uint256 _tradeId) external nonReentrant {
         Trade storage trade = trades[_tradeId];
         if (!trade.isActive) revert TradeNotActive();
@@ -164,6 +166,39 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         emit TradeCancelled(_tradeId);
     }
 
+    /**
+     * @dev Internal function to execute a trade once all assets are deposited
+     * @param _tradeId The ID of the trade to execute
+     * @notice This function transfers all deposited assets to their respective recipients and marks the trade as inactive
+     */
+    function _executeTrade(uint256 _tradeId) internal {
+        Trade storage trade = trades[_tradeId];
+        uint256 participantCount = trade.participants.length;
+
+        trade.isActive = false;
+
+        for (uint i = 0; i < participantCount; i++) {
+            address from = trade.participants[i];
+            Asset[] storage assets = trade.assets[from];
+
+            for (uint j = 0; j < assets.length; j++) {
+                Asset storage asset = assets[j];
+                _transferAsset(asset, address(this), asset.recipient);
+                asset.isDeposited = false;
+            }
+        }
+
+        emit TradeCompleted(_tradeId);
+    }
+
+    /**
+     * @dev Internal function to transfer an asset between addresses
+     * @param asset The asset to transfer
+     * @param from The address to transfer from
+     * @param to The address to transfer to
+     * @notice This function handles the transfer of different asset types (ERC20, ERC721, ERC1155, CryptoPunk)
+     * @notice It uses the appropriate transfer method based on the asset type
+     */
     function _transferAsset(
         Asset memory asset,
         address from,
@@ -182,11 +217,55 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         }
     }
 
+    /**
+     * @dev Retrieves the status of a single trade
+     * @param _tradeId The ID of the trade
+     * @return isActive Whether the trade is still active
+     * @return depositedAssetCount The number of assets deposited for this trade
+     * @return totalAssetCount The total number of assets involved in this trade
+     */
     function getTradeStatus(uint256 _tradeId) external view returns (bool isActive, uint256 depositedAssetCount, uint256 totalAssetCount) {
         Trade storage trade = trades[_tradeId];
         return (trade.isActive, trade.depositedAssetCount, trade.totalAssetCount);
     }
 
+    /**
+     * @dev Retrieves the status of multiple trades
+     * @param _tradeIds An array of trade IDs to query (max 10)
+     * @return isActive An array of booleans indicating whether each trade is active
+     * @return depositedAssetCount An array of deposited asset counts for each trade
+     * @return totalAssetCount An array of total asset counts for each trade
+     */
+    function getMultipleTradeStatuses(uint256[] calldata _tradeIds) external view returns (
+        bool[] memory isActive,
+        uint256[] memory depositedAssetCount,
+        uint256[] memory totalAssetCount
+    ) {
+        require(_tradeIds.length <= 10, "Too many trade IDs requested");
+
+        isActive = new bool[](_tradeIds.length);
+        depositedAssetCount = new uint256[](_tradeIds.length);
+        totalAssetCount = new uint256[](_tradeIds.length);
+
+        for (uint256 i = 0; i < _tradeIds.length; i++) {
+            Trade storage trade = trades[_tradeIds[i]];
+            isActive[i] = trade.isActive;
+            depositedAssetCount[i] = trade.depositedAssetCount;
+            totalAssetCount[i] = trade.totalAssetCount;
+        }
+
+        return (isActive, depositedAssetCount, totalAssetCount);
+    }
+
+    /**
+     * @dev Retrieves detailed information about a trade
+     * @param _tradeId The ID of the trade
+     * @return participants An array of participant addresses
+     * @return assets A 2D array of assets involved in the trade
+     * @return isActive Whether the trade is still active
+     * @return depositedAssetCount The number of assets deposited for this trade
+     * @return totalAssetCount The total number of assets involved in this trade
+     */
     function getTradeAssets(uint256 _tradeId) external view returns (
         address[] memory participants,
         Asset[][] memory assets,
