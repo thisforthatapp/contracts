@@ -46,6 +46,7 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     mapping(uint256 => mapping(address => bool)) public isParticipant;
     uint256 public constant MAX_PARTICIPANTS = 10;
     uint256 public constant MAX_ASSETS_PER_PARTICIPANT = 10;
+    uint256 public constant MAX_BATCH_DEPOSITS = 20;
     address public constant CRYPTOPUNKS_ADDRESS = 0xb47e3cd837dDF8e4c57F05d70Ab865de6e193BBB;
 
     event TradeCreated(uint256 indexed tradeId, address[] participants);
@@ -116,24 +117,72 @@ contract TFTV1Escrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     ) external nonReentrant {
         Trade storage trade = trades[_tradeId];
         if (!trade.isActive) revert TradeNotActive();
-        if (!isParticipant[_tradeId][msg.sender]) revert NotParticipant();
 
-        Asset[] storage assets = trade.assets[msg.sender];
         bool assetFound = false;
-        for (uint i = 0; i < assets.length; i++) {
-            Asset storage asset = assets[i];
-            if (asset.token == _token && asset.tokenId == _tokenId && asset.assetType == _assetType) {
-                if (asset.isDeposited) revert AssetAlreadyDeposited();
-                _transferAsset(asset, msg.sender, address(this));
-                asset.isDeposited = true;
-                assetFound = true;
-                trade.depositedAssetCount++;
-                emit AssetDeposited(_tradeId, msg.sender, _token, _tokenId, _amount, _assetType, asset.recipient);
-                break;
+        for (uint i = 0; i < trade.participants.length; i++) {
+            Asset[] storage assets = trade.assets[trade.participants[i]];
+            for (uint j = 0; j < assets.length; j++) {
+                Asset storage asset = assets[j];
+                if (asset.token == _token && asset.tokenId == _tokenId && asset.assetType == _assetType) {
+                    if (asset.isDeposited) revert AssetAlreadyDeposited();
+                    _transferAsset(asset, msg.sender, address(this));
+                    asset.isDeposited = true;
+                    assetFound = true;
+                    trade.depositedAssetCount++;
+                    emit AssetDeposited(_tradeId, msg.sender, _token, _tokenId, _amount, _assetType, asset.recipient);
+                    return;
+                }
             }
         }
 
         if (!assetFound) revert AssetNotFound();
+
+        if (trade.depositedAssetCount == trade.totalAssetCount) {
+            _executeTrade(_tradeId);
+        }
+    }
+
+    /**
+    * @dev Allows a user to deposit multiple assets for a trade in a single transaction
+    * @param _tradeId The ID of the trade
+    * @param _tokens Array of token addresses
+    * @param _tokenIds Array of token IDs (for ERC721 and ERC1155)
+    * @param _amounts Array of token amounts (for ERC20 and ERC1155)
+    * @param _assetTypes Array of asset types
+    */
+    function batchDepositAssets(
+        uint256 _tradeId,
+        address[] calldata _tokens,
+        uint256[] calldata _tokenIds,
+        uint256[] calldata _amounts,
+        AssetType[] calldata _assetTypes
+    ) external nonReentrant {
+        require(_tokens.length == _tokenIds.length && _tokens.length == _amounts.length && _tokens.length == _assetTypes.length, "Input arrays must have the same length");
+        require(_tokens.length <= MAX_BATCH_DEPOSITS, "Batch size exceeds maximum allowed");
+
+        Trade storage trade = trades[_tradeId];
+        if (!trade.isActive) revert TradeNotActive();
+
+        for (uint i = 0; i < _tokens.length; i++) {
+            bool assetFound = false;
+            for (uint j = 0; j < trade.participants.length; j++) {
+                Asset[] storage assets = trade.assets[trade.participants[j]];
+                for (uint k = 0; k < assets.length; k++) {
+                    Asset storage asset = assets[k];
+                    if (asset.token == _tokens[i] && asset.tokenId == _tokenIds[i] && asset.assetType == _assetTypes[i]) {
+                        if (asset.isDeposited) revert AssetAlreadyDeposited();
+                        _transferAsset(asset, msg.sender, address(this));
+                        asset.isDeposited = true;
+                        assetFound = true;
+                        trade.depositedAssetCount++;
+                        emit AssetDeposited(_tradeId, msg.sender, _tokens[i], _tokenIds[i], _amounts[i], _assetTypes[i], asset.recipient);
+                        break;
+                    }
+                }
+                if (assetFound) break;
+            }
+            if (!assetFound) revert AssetNotFound();
+        }
 
         if (trade.depositedAssetCount == trade.totalAssetCount) {
             _executeTrade(_tradeId);

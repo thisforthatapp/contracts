@@ -157,6 +157,87 @@ contract TFTV1EscrowTest is Test {
         assertEq(mockERC1155.balanceOf(addr2, 1), 50);
     }
 
+    function testBatchDepositAssets() public {
+        // Create a trade first
+        address[] memory participants = new address[](2);
+        participants[0] = addr1;
+        participants[1] = addr2;
+
+        TFTV1Escrow.Asset[][] memory assets = new TFTV1Escrow.Asset[][](2);
+        assets[0] = new TFTV1Escrow.Asset[](2);
+        assets[1] = new TFTV1Escrow.Asset[](1);
+
+        assets[0][0] = TFTV1Escrow.Asset({
+            token: address(mockERC20),
+            tokenId: 0,
+            amount: 100 ether,
+            assetType: TFTV1Escrow.AssetType.ERC20,
+            recipient: addr2,
+            isDeposited: false
+        });
+
+        assets[0][1] = TFTV1Escrow.Asset({
+            token: address(mockERC1155),
+            tokenId: 1,
+            amount: 50,
+            assetType: TFTV1Escrow.AssetType.ERC1155,
+            recipient: addr2,
+            isDeposited: false
+        });
+
+        assets[1][0] = TFTV1Escrow.Asset({
+            token: address(mockERC721),
+            tokenId: 2,
+            amount: 1,
+            assetType: TFTV1Escrow.AssetType.ERC721,
+            recipient: addr1,
+            isDeposited: false
+        });
+
+        uint256 tradeId = escrow.createTrade(participants, assets);
+
+        // Prepare batch deposit for addr1
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(mockERC20);
+        tokens[1] = address(mockERC1155);
+
+        uint256[] memory tokenIds = new uint256[](2);
+        tokenIds[0] = 0;
+        tokenIds[1] = 1;
+
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 100 ether;
+        amounts[1] = 50;
+
+        TFTV1Escrow.AssetType[] memory assetTypes = new TFTV1Escrow.AssetType[](2);
+        assetTypes[0] = TFTV1Escrow.AssetType.ERC20;
+        assetTypes[1] = TFTV1Escrow.AssetType.ERC1155;
+
+        // Approve and batch deposit assets for addr1
+        vm.startPrank(addr1);
+        mockERC20.approve(address(escrow), 100 ether);
+        mockERC1155.setApprovalForAll(address(escrow), true);
+        escrow.batchDepositAssets(tradeId, tokens, tokenIds, amounts, assetTypes);
+        vm.stopPrank();
+
+        // Deposit asset for addr2
+        vm.startPrank(addr2);
+        mockERC721.approve(address(escrow), 2);
+        escrow.depositAsset(tradeId, address(mockERC721), 2, 1, TFTV1Escrow.AssetType.ERC721);
+        vm.stopPrank();
+
+        // Check trade status
+        (bool isActive, uint256 depositedAssetCount, uint256 totalAssetCount) = escrow.getTradeStatus(tradeId);
+        assertFalse(isActive);
+        assertEq(depositedAssetCount, 3);
+        assertEq(totalAssetCount, 3);
+
+        // Check balances after trade execution
+        assertEq(mockERC20.balanceOf(addr2), 1100 ether);
+        assertEq(mockERC721.ownerOf(2), addr1);
+        assertEq(mockERC1155.balanceOf(addr2, 1), 50);
+    }
+
     function testCancelTrade() public {
         // Create a trade first
         address[] memory participants = new address[](2);
@@ -298,6 +379,34 @@ contract TFTV1EscrowTest is Test {
         mockERC1155.setApprovalForAll(address(escrow), true);
         vm.expectRevert(TFTV1Escrow.TradeNotActive.selector);
         escrow.depositAsset(tradeId, address(mockERC1155), 1, 50, TFTV1Escrow.AssetType.ERC1155);
+    }
+
+    function testFailBatchDepositIncorrectAssets() public {
+        uint256 tradeId = _createBasicTrade();
+
+        // Prepare batch deposit with incorrect assets
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(anotherERC20);
+        tokens[1] = address(anotherERC1155);
+
+        uint256[] memory tokenIds = new uint256[](2);
+        tokenIds[0] = 0;
+        tokenIds[1] = 1;
+
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 100 ether;
+        amounts[1] = 50;
+
+        TFTV1Escrow.AssetType[] memory assetTypes = new TFTV1Escrow.AssetType[](2);
+        assetTypes[0] = TFTV1Escrow.AssetType.ERC20;
+        assetTypes[1] = TFTV1Escrow.AssetType.ERC1155;
+
+        vm.startPrank(addr1);
+        anotherERC20.approve(address(escrow), 100 ether);
+        anotherERC1155.setApprovalForAll(address(escrow), true);
+        vm.expectRevert(TFTV1Escrow.AssetNotFound.selector);
+        escrow.batchDepositAssets(tradeId, tokens, tokenIds, amounts, assetTypes);
+        vm.stopPrank();
     }
 
     function _createBasicTrade() internal returns (uint256) {
