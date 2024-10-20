@@ -1,3 +1,4 @@
+// forge script script/DeployTFTV1Escrow.s.sol:DeployTFTV1Escrow --rpc-url http://localhost:8545 --broadcast
 // File: script/DeployTFTV1Escrow.s.sol
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
@@ -10,8 +11,8 @@ import "../test/mocks/MockERC1155.sol";
 
 contract DeployTFTV1Escrow is Script {
     function run() external {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-
+        string memory pk = "";
+        uint256 deployerPrivateKey = vm.parseUint(pk);
         vm.startBroadcast(deployerPrivateKey);
 
         TFTV1Escrow escrow = new TFTV1Escrow();
