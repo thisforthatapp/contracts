@@ -79,9 +79,10 @@ contract TFTEscrowTest is Test {
     MockERC1155 erc1155Token;
     MockCryptoPunks cryptoPunks;
 
-    address alice = makeAddr("alice");
-    address bob = makeAddr("bob");
-    address charlie = makeAddr("charlie");
+    address constant CRYPTOPUNKS_ADDRESS = 0xb47e3cd837dDF8e4c57F05d70Ab865de6e193BBB;
+    address alice = address(0x1);
+    address bob = address(0x2);
+    address charlie = address(0x3);
 
     // Events for tests
     event TradeCreated(uint256 indexed tradeId, bytes32 indexed tradeHash);
@@ -91,11 +92,19 @@ contract TFTEscrowTest is Test {
 
     // Setup function
     function setUp() public {
+        cryptoPunks = new MockCryptoPunks();
+        vm.etch(CRYPTOPUNKS_ADDRESS, address(cryptoPunks).code);
+        
+        // Set up punk ownership
+        MockCryptoPunks(CRYPTOPUNKS_ADDRESS).setInitialOwner(alice, 5577);
+        
         escrow = new TFTEscrow();
         erc721Token = new MockERC721();
         erc1155Token = new MockERC1155();
 
-        vm.startPrank(address(this));
+        vm.deal(alice, 100 ether);
+        vm.deal(bob, 100 ether);
+
         erc721Token.mint(alice, 1);
         erc721Token.mint(alice, 2);
         erc721Token.mint(bob, 3);
@@ -103,7 +112,6 @@ contract TFTEscrowTest is Test {
         
         erc1155Token.mint(alice, 1, 10);
         erc1155Token.mint(bob, 2, 20);
-        vm.stopPrank();
     }
 
     // Helper functions
@@ -318,7 +326,7 @@ contract TFTEscrowTest is Test {
         escrow.createTrade(participants, assets);
     }
 
-function test_itShouldPreventExceedingMaxAssets() public {
+    function test_itShouldPreventExceedingMaxAssets() public {
         address[] memory participants = createParticipants();
 
         // Create more assets than allowed per participant
