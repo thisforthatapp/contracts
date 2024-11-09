@@ -10,6 +10,10 @@ import "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/**
+ * @notice Interface for interacting with the CryptoPunks contract
+ * @dev Defines the required functions for buying, selling, and transferring CryptoPunks
+ */
 interface ICryptoPunks {
     function punkIndexToAddress(uint256 punkIndex) external view returns (address);
     function buyPunk(uint256 punkIndex) external payable;
@@ -24,11 +28,36 @@ interface ICryptoPunks {
     function transferPunk(address to, uint256 punkIndex) external;
 }
 
+/**
+████████╗███████╗████████╗
+╚══██╔══╝██╔════╝╚══██╔══╝
+   ██║   █████╗     ██║   
+   ██║   ██╔══╝     ██║   
+   ██║   ██║        ██║   
+   ╚═╝   ╚═╝        ╚═╝
+
+ * @title This For That - A Multi-Asset Escrow Contract
+ * @notice This contract enables secure peer-to-peer trading of various crypto assets
+ * @dev Supports ERC20, ERC721, ERC1155 tokens and CryptoPunks
+ */
 contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     using SafeERC20 for IERC20;
 
+    /**
+     * @notice Enum defining the supported asset types
+     */
     enum AssetType { ERC20, ERC721, ERC1155, CryptoPunk }
 
+    /**
+     * @notice Struct containing information about a single asset in a trade
+     * @param token The contract address of the token
+     * @param recipient The address that will receive the asset after trade completion
+     * @param depositor The address that deposited the asset
+     * @param tokenId The ID of the token (for ERC721, ERC1155, and CryptoPunks)
+     * @param amount The amount of tokens (for ERC20 and ERC1155)
+     * @param assetType The type of the asset (ERC20, ERC721, etc.)
+     * @param isDeposited Whether the asset has been deposited into the contract
+     */
     struct Asset {
         address token;
         address recipient;
@@ -39,6 +68,13 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         bool isDeposited;
     }
 
+    /**
+     * @notice Struct containing information about a trade
+     * @param depositedAssetCount Number of assets currently deposited
+     * @param totalAssetCount Total number of assets in the trade
+     * @param isActive Whether the trade is currently active
+     * @param assets Array of assets involved in the trade
+     */
     struct Trade {
         uint256 depositedAssetCount;
         uint256 totalAssetCount;
@@ -46,15 +82,18 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         Asset[] assets;
     }
 
+    // Storage mappings
     mapping(uint256 => Trade) public trades;
     mapping(uint256 => mapping(address => bool)) public isParticipant;
     mapping(uint256 => mapping(bytes32 => bool)) private validAssets;
 
+    // Constants
     uint256 public constant MAX_PARTICIPANTS = 10;
     uint256 public constant MAX_ASSETS_PER_PARTICIPANT = 10;
     uint256 public constant MAX_BATCH_DEPOSITS = 20;
     address public constant CRYPTOPUNKS_ADDRESS = 0xb47e3cd837dDF8e4c57F05d70Ab865de6e193BBB;
 
+    // Events
     event TradeCreated(uint256 indexed tradeId, bytes32 indexed tradeHash);
     event AssetDeposited(
         uint256 indexed tradeId, 
@@ -64,6 +103,7 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     event TradeCompleted(uint256 indexed tradeId);
     event TradeCancelled(uint256 indexed tradeId, address indexed canceller);
 
+    // Custom errors
     error InvalidParticipantCount();
     error MaxAssetsExceeded();
     error TradeNotActive();
@@ -76,6 +116,12 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
 
     constructor() Ownable(msg.sender) {}
 
+    /**
+     * @notice Creates a new trade with specified participants and assets
+     * @param participants Array of addresses that can participate in the trade
+     * @param assets Array of assets to be traded
+     * @return tradeId Unique identifier for the created trade
+     */
     function createTrade(
         address[] calldata participants,
         Asset[] calldata assets
@@ -113,6 +159,14 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         return tradeId;
     }
 
+    /**
+     * @notice Deposits a single asset into an active trade
+     * @param tradeId ID of the trade
+     * @param token Address of the token contract
+     * @param tokenId ID of the token (for ERC721, ERC1155, and CryptoPunks)
+     * @param amount Amount of tokens (for ERC20 and ERC1155)
+     * @param assetType Type of the asset
+     */
     function depositAsset(
         uint256 tradeId,
         address token,
@@ -152,6 +206,14 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         }
     }
 
+    /**
+     * @notice Deposits multiple assets into an active trade in a single transaction
+     * @param tradeId ID of the trade
+     * @param tokens Array of token addresses
+     * @param tokenIds Array of token IDs
+     * @param amounts Array of token amounts
+     * @param assetTypes Array of asset types
+     */
     function batchDepositAssets(
         uint256 tradeId,
         address[] calldata tokens,
@@ -205,6 +267,10 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         }
     }
 
+    /**
+     * @notice Cancels an active trade and returns deposited assets to their depositors
+     * @param tradeId ID of the trade to cancel
+     */
     function cancelTrade(uint256 tradeId) external nonReentrant {
         Trade storage trade = trades[tradeId];
         if (!trade.isActive) revert TradeNotActive();
@@ -223,6 +289,10 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         emit TradeCancelled(tradeId, msg.sender);
     }
 
+    /**
+     * @notice Internal function to execute a trade once all assets are deposited
+     * @param tradeId ID of the trade to execute
+     */
     function _executeTrade(uint256 tradeId) internal {
         Trade storage trade = trades[tradeId];
         trade.isActive = false;
@@ -237,6 +307,12 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         emit TradeCompleted(tradeId);
     }
 
+    /**
+     * @notice Internal function to handle asset transfers based on asset type
+     * @param asset The asset to transfer
+     * @param from Address to transfer from
+     * @param to Address to transfer to
+     */
     function _transferAsset(
         Asset memory asset,
         address from,
@@ -279,6 +355,16 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         }
     }
 
+    /**
+     * @notice Checks if an asset is valid for a given trade
+     * @param tradeId ID of the trade to check
+     * @param token Address of the token contract
+     * @param tokenId ID of the token (for ERC721, ERC1155, and CryptoPunks)
+     * @param amount Amount of tokens (for ERC20 and ERC1155)
+     * @param assetType Type of the asset
+     * @return bool True if the asset is valid for the trade, false otherwise
+     * @dev Uses a hash of the asset parameters to check against the validAssets mapping
+     */
     function isValidAsset(
         uint256 tradeId,
         address token,
@@ -294,6 +380,16 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         ))];
     }
 
+    /**
+     * @notice Checks if an asset is valid for a given trade
+     * @param tradeId ID of the trade to check
+     * @param token Address of the token contract
+     * @param tokenId ID of the token (for ERC721, ERC1155, and CryptoPunks)
+     * @param amount Amount of tokens (for ERC20 and ERC1155)
+     * @param assetType Type of the asset
+     * @return bool True if the asset is valid for the trade, false otherwise
+     * @dev Uses a hash of the asset parameters to check against the validAssets mapping
+     */
     function getTradeInfo(uint256 tradeId) external view returns (
         bool isActive,
         uint256 depositedAssetCount,
@@ -309,6 +405,16 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
         );
     }
 
+    /**
+     * @notice Retrieves status information for multiple trades in a single call
+     * @param tradeIds Array of trade IDs to query
+     * @return isActive Array of boolean values indicating if each trade is active
+     * @return depositedAssetCount Array of numbers indicating deposited assets for each trade
+     * @return totalAssetCount Array of numbers indicating total assets for each trade
+     * @return assets 2D array containing all assets for each trade
+     * @dev Useful for efficiently querying multiple trades at once
+     * @dev Limited to 10 trades per call to prevent excessive gas usage
+     */
     function getMultipleTradeStatuses(uint256[] calldata tradeIds) external view returns (
         bool[] memory isActive,
         uint256[] memory depositedAssetCount,
