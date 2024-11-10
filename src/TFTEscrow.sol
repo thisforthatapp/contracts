@@ -383,11 +383,10 @@ contract TFTEscrow is ReentrancyGuard, Ownable, ERC721Holder, ERC1155Holder {
     /**
      * @notice Checks if an asset is valid for a given trade
      * @param tradeId ID of the trade to check
-     * @param token Address of the token contract
-     * @param tokenId ID of the token (for ERC721, ERC1155, and CryptoPunks)
-     * @param amount Amount of tokens (for ERC20 and ERC1155)
-     * @param assetType Type of the asset
-     * @return bool True if the asset is valid for the trade, false otherwise
+     * @return isActive True if the asset is valid for the trade, false otherwise
+     * @return depositedAssetCount Number of assets currently deposited
+     * @return totalAssetCount Total number of assets in the trade
+     * @return assets Array of assets involved in the trade
      * @dev Uses a hash of the asset parameters to check against the validAssets mapping
      */
     function getTradeInfo(uint256 tradeId) external view returns (
