@@ -36,7 +36,7 @@ interface ICryptoPunks {
    ██║   ██║        ██║   
    ╚═╝   ╚═╝        ╚═╝
 
- * @title This For That - A Multi-Asset Escrow Contract
+ * @title This For That - NFTs were made to be swapped
  * @notice This contract enables secure peer-to-peer trading of various crypto assets
  * @dev Supports ERC20, ERC721, ERC1155 tokens and CryptoPunks
  */
